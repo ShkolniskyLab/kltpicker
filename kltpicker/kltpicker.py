@@ -1,9 +1,7 @@
-import mrcfile
 from pathlib import Path
 import numpy as np
 import scipy.special as ssp
-from .cryo_utils import downsample, lgwt
-from .micrograph import Micrograph
+from .cryo_utils import lgwt
 from multiprocessing import Pool
 
 # Globals:
@@ -79,7 +77,6 @@ class KLTPicker:
         self.gpu_use = args.gpu_use
         self.mgscale = 100 / args.particle_size
         self.max_order = args.max_order
-        self.micrographs = np.array([])
         self.quad_ker = 0
         self.quad_nys = 0
         self.rho = 0
@@ -148,26 +145,3 @@ class KLTPicker:
         self.r_r = r_r
         self.rad_mat = rad_mat
 
-    def get_micrographs(self):
-        """Reads .mrc files, downsamples them and adds them to the Picker object."""
-        micrographs = []
-        mrc_files = self.input_dir.glob("*.mrc")
-        for mrc_file in mrc_files:
-            mrc = mrcfile.open(mrc_file)
-            mrc_data = mrc.data.astype('float64').transpose()
-            mrc.close()
-            mrc_size = mrc_data.shape
-            mrc_data = np.rot90(mrc_data)
-            data = downsample(mrc_data[np.newaxis, :, :], int(np.floor(self.mgscale * mrc_size[0])))[0]
-            if np.mod(data.shape[0], 2) == 0:  # Odd size is needed.
-                data = data[0:-1, :]
-            if np.mod(data.shape[1], 2) == 0:  # Odd size is needed.
-                data = data[:, 0:-1]
-            pic = data  # For figures before standardization.
-            data = data - np.mean(data.transpose().flatten())
-            data = data / np.linalg.norm(data, 'fro')
-            mc_size = data.shape
-            micrograph = Micrograph(data, pic, mc_size, mrc_file.name, mrc_size)
-            micrographs.append(micrograph)
-        micrographs = np.array(micrographs)
-        self.micrographs = micrographs

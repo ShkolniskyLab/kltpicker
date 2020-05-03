@@ -63,9 +63,8 @@ class Micrograph:
         Pick particles and noise images from the scoring matrix.
     """
 
-    def __init__(self, micrograph, micrograph_pic, mc_size, mrc_name, mg_big_size):
+    def __init__(self, micrograph, mc_size, mrc_name, mg_big_size):
         self.micrograph = micrograph
-        self.micrograph_pic = micrograph_pic
         self.mc_size = mc_size
         self.mg_big_size = mg_big_size
         self.noise_mc = 0

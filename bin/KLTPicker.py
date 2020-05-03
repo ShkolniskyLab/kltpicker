@@ -9,6 +9,10 @@ from kltpicker.kltpicker import KLTPicker
 from kltpicker.util import trig_interpolation
 from kltpicker.kltpicker_input import get_args
 from tqdm import tqdm
+import mrcfile
+from kltpicker.micrograph import Micrograph
+from kltpicker.cryo_utils import downsample
+
 warnings.filterwarnings("ignore")
 
 # Globals:
@@ -54,6 +58,23 @@ def process_micrograph(micrograph, picker):
     num_picked_particles, num_picked_noise = micrograph.detect_particles(picker)
     return num_picked_particles, num_picked_noise
 
+def get_micrograph(mrc_file, mgscale):
+    """Reads .mrc files and downsamples them."""
+    mrc = mrcfile.open(mrc_file)
+    mrc_data = mrc.data.astype('float64').transpose()
+    mrc.close()
+    mrc_size = mrc_data.shape
+    mrc_data = np.rot90(mrc_data)
+    mrc_data = downsample(mrc_data[np.newaxis, :, :], int(np.floor(mgscale * mrc_size[0])))[0]
+    if np.mod(mrc_data.shape[0], 2) == 0:  # Odd size is needed.
+        mrc_data = mrc_data[0:-1, :]
+    if np.mod(mrc_data.shape[1], 2) == 0:  # Odd size is needed.
+        mrc_data = mrc_data[:, 0:-1]
+    mrc_data = mrc_data - np.mean(mrc_data.transpose().flatten())
+    mrc_data = mrc_data / np.linalg.norm(mrc_data, 'fro')
+    mc_size = mrc_data.shape
+    micrograph = Micrograph(mrc_data, mc_size, mrc_file.name, mrc_size)
+    return micrograph
 
 def main():
     args = parse_args()
@@ -72,8 +93,9 @@ def main():
         print("Preprocess finished.")
     else:
         print("Skipping preprocessing.")
-    picker.get_micrographs()
-    for micrograph in tqdm(picker.micrographs, desc='Picking particles from micrographs...'):
+    mrc_files = picker.input_dir.glob("*.mrc")
+    for mrc_file in tqdm(list(mrc_files), desc='Picking particles from micrographs...'):
+        micrograph = get_micrograph(mrc_file, picker.mgscale)
         process_micrograph(micrograph, picker)
     print("Finished successfully!")
 

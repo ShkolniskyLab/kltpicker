@@ -1,9 +1,11 @@
 import numpy as np
 from scipy import signal
+from numba import njit, jit
 from scipy.ndimage import uniform_filter
 from scipy.fftpack import fftshift
 
 
+@jit
 def fftcorrelate(image, filt):
     filt = np.rot90(filt, 2)
     pad_shift = 1 - np.mod(np.array(filt.shape), 2)
@@ -15,7 +17,6 @@ def fftcorrelate(image, filt):
         padded_image = padded_image[pad_shift[0] - 1: -1, pad_shift[1] - 1: -1]
     result = signal.fftconvolve(padded_image, filt, 'valid')
     return result
-
 
 def f_trans_2(b):
     """
@@ -58,7 +59,7 @@ def f_trans_2(b):
     h = np.rot90(h, k=2)
     return h
 
-
+@njit
 def radial_avg(z, m):
     """
     Radially average 2-D square matrix z into m bins.
@@ -101,7 +102,7 @@ def stdfilter(a, nhood):
     c2 = uniform_filter(a * a, nhood, mode='reflect')
     return np.sqrt(c2 - c1 * c1) * np.sqrt(nhood ** 2. / (nhood ** 2 - 1))
 
-
+@njit
 def trig_interpolation(x, y, xq):
     n = x.size
     h = 2 / n
