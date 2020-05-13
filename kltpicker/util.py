@@ -1,11 +1,18 @@
 import numpy as np
 from scipy import signal
-from numba import njit, jit
 from scipy.ndimage import uniform_filter
 from scipy.fftpack import fftshift
+from numba import jit
 
 
-@jit
+def q_convolve(i, q, patch_size_func, noise_mc):
+    q_tmp = np.reshape(q[i, :], (patch_size_func, patch_size_func)).transpose()
+    q_tmp = q_tmp - np.mean(q_tmp)
+    q_tmp = np.flip(q_tmp, 1)
+    v_tmp = signal.fftconvolve(noise_mc, q_tmp, 'valid')
+    return v_tmp.astype("float32")
+
+
 def fftcorrelate(image, filt):
     filt = np.rot90(filt, 2)
     pad_shift = 1 - np.mod(np.array(filt.shape), 2)
@@ -17,6 +24,7 @@ def fftcorrelate(image, filt):
         padded_image = padded_image[pad_shift[0] - 1: -1, pad_shift[1] - 1: -1]
     result = signal.fftconvolve(padded_image, filt, 'valid')
     return result
+
 
 def f_trans_2(b):
     """
@@ -59,7 +67,8 @@ def f_trans_2(b):
     h = np.rot90(h, k=2)
     return h
 
-@njit
+
+#@jit(nopython=True, parallel=True)
 def radial_avg(z, m):
     """
     Radially average 2-D square matrix z into m bins.
@@ -74,23 +83,24 @@ def radial_avg(z, m):
     :return R: Mid-points of the bins.
     """
     N = z.shape[1]
-    X, Y = np.meshgrid(np.arange(N) * 2 / (N - 1) - 1, np.arange(N) * 2 / (N - 1) - 1)
+    Y = np.repeat(np.arange(N) * 2 / (N - 1) - 1, N).reshape((N, N))
+    X = Y.transpose()
     r = np.sqrt(np.square(X) + np.square(Y))
     dr = 1 / (m - 1)
-    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1, endpoint=True)
+    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1) # endpoint=True)
     R = (rbins[0:-1] + rbins[1:]) / 2
     zr = np.zeros(m)
     for j in range(m - 1):
         bins = np.where(np.logical_and(r >= rbins[j], r < rbins[j + 1]))
-        n = np.count_nonzero(np.logical_and(r >= rbins[j], r < rbins[j + 1]))
+        n = len(np.nonzero(np.logical_and(r >= rbins[j], r < rbins[j + 1]))[0])
         if n:
-            zr[j] = sum(z[bins]) / n
+            zr[j] = np.sum(z[bins]) / n
         else:
             zr[j] = np.nan
     bins = np.where(np.logical_and(r >= rbins[m - 1], r <= 1))
-    n = np.count_nonzero(np.logical_and(r >= rbins[m - 1], r <= 1))
+    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1)))
     if n != 0:
-        zr[m - 1] = sum(z[bins]) / n
+        zr[m - 1] = np.sum(z[bins]) / n
     else:
         zr[m - 1] = np.nan
     return zr, R
@@ -102,7 +112,8 @@ def stdfilter(a, nhood):
     c2 = uniform_filter(a * a, nhood, mode='reflect')
     return np.sqrt(c2 - c1 * c1) * np.sqrt(nhood ** 2. / (nhood ** 2 - 1))
 
-@njit
+
+@jit(nopython=True, parallel=True)
 def trig_interpolation(x, y, xq):
     n = x.size
     h = 2 / n

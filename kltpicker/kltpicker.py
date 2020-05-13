@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import scipy.special as ssp
 from .cryo_utils import lgwt
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -122,7 +122,7 @@ class KLTPicker:
         r_rho = np.outer(r, rho)
         rsamp_r = np.outer(np.ones(len(rsamp)), r)
         rsamp_rho = np.outer(rsamp, rho)
-        pool = Pool()
+        pool = Pool(max(cpu_count()-2, 1))
         res_j_r_rho = pool.starmap(ssp.jv, [(n, r_rho) for n in range(self.max_order)])
         res_j_samp = pool.starmap(ssp.jv, [(n, rsamp_rho) for n in range(self.max_order)])
         res_cosine = pool.map(np.cos, [n * theta for n in range(self.max_order)])

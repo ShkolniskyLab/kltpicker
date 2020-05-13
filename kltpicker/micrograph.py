@@ -1,9 +1,10 @@
 import numpy as np
-from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate
+from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, q_convolve
 from scipy import signal
 from numpy.matlib import repmat
 from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat, als_find_min
-from scipy.linalg import eigh
+from multiprocessing import Pool, cpu_count
+from numpy.linalg import eigh
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -273,14 +274,21 @@ class Micrograph:
         num_of_patch_row = last_block_row
         num_of_patch_col = last_block_col
         q = q.transpose().copy()
-        v = np.zeros((num_of_patch_row, self.num_of_func, num_of_patch_col), order='F')
-        for i in range(self.num_of_func):
-            q_tmp = np.reshape(q[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
-            q_tmp = q_tmp - np.mean(q_tmp)
-            q_tmp = np.flip(q_tmp, 1)
-            v_tmp = signal.fftconvolve(self.noise_mc, q_tmp, 'valid')
-            v[:, i, :] = v_tmp
-        log_test_mat_rows = [np.sum((v[:, :, j] @ t_mat) * v[:, :, j], 1) for j in range(num_of_patch_col)]
+        #v = np.zeros((num_of_patch_row, self.num_of_func, num_of_patch_col), order='F')
+        # for i in range(self.num_of_func):
+        #     q_tmp = np.reshape(q[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+        #     q_tmp = q_tmp - np.mean(q_tmp)
+        #     q_tmp = np.flip(q_tmp, 1)
+        #     v_tmp = signal.fftconvolve(self.noise_mc, q_tmp, 'valid')
+        #     v[:, i, :] = v_tmp
+        pool = Pool(max(cpu_count()-2, 1))
+        v_res = pool.starmap(q_convolve,
+                             [(i, q, kltpicker.patch_size_func, self.noise_mc) for i in range(self.num_of_func)])
+        pool.close()
+        pool.join()
+        t_mat = t_mat.transpose().copy()
+        v = np.squeeze(v_res) #.transpose()
+        log_test_mat_rows = [np.sum((t_mat @ v[:, :, j]) * v[:, :, j], 0) for j in range(num_of_patch_col)]
         log_test_mat = np.squeeze(log_test_mat_rows) - mu
         log_test_mat = log_test_mat.transpose()
         neigh = np.ones((kltpicker.patch_size_func, kltpicker.patch_size_func))

@@ -1,9 +1,9 @@
 import numpy as np
-from numba import njit
 from pyfftw.interfaces.numpy_fft import fft2, ifft2
 from pyfftw import FFTW
 from numpy.polynomial.legendre import leggauss
 import operator as op
+from numba import jit
 
 
 def crop(x, out_shape):
@@ -231,15 +231,13 @@ def cryo_epsdr(vol, samples_idx, max_d):
     return r, x, cnt
 
 
-@njit
 def gwindow(p, max_d):
     x, y = np.meshgrid(np.arange(-(p - 1), p), np.arange(-(p - 1), p))
     alpha = 3.0
     w = np.exp(-alpha * (np.square(x) + np.square(y)) / (2 * max_d ** 2))
     return w
 
-
-@njit
+@jit(nopython=True)
 def bsearch(x, lower_bound, upper_bound):
     if lower_bound > x[-1] or upper_bound < x[0] or upper_bound < lower_bound:
         return None, None
