@@ -5,13 +5,14 @@ from kltpicker import Micrograph
 import mrcfile
 from kltpicker.cryo_utils import downsample
 from pathlib import Path
+from datetime import datetime
 
 
 parser = argparse.ArgumentParser()
 args = parser.parse_args()
 args.particle_size = 300
-args.input_dir = "c:\\users\\dalit\\Documents\\uni\\year3\\shkol_work\\mrcs"
-args.output_dir = "c:\\users\\dalit\\Documents\\uni\\year3\\shkol_work\\out"
+args.input_dir = "/home/dalitcohen/Documents/mrcs"
+args.output_dir = "/home/dalitcohen/Documents/out"
 args.gpu_use = 0
 args.max_order = 100
 args.num_of_particles = -1
@@ -54,7 +55,7 @@ if __name__ == "__main__":
     picker.r_r = np.load("r_r.npy")
     picker.rad_mat = np.load("rad_mat.npy")
     picker.rsamp_length = 1521
-    picker.input_dir = Path("C:\\Users\\dalit\\Documents\\uni\\year3\\shkol_work\\mrcs")
+    picker.input_dir = Path("/home/dalitcohen/Documents/mrcs")
     picker.mgscale = 100 / 300
     mrc_files = picker.input_dir.glob("*.mrc")
     micrograph = get_micrograph(list(mrc_files)[0], picker.mgscale)
@@ -65,5 +66,7 @@ if __name__ == "__main__":
     micrograph.noise_mc = np.load("noise_mc.npy")
     micrograph.r = np.load("r.npy")
     print("starting")
-    micrograph.construct_klt_templates(picker)
+    start = datetime.now()
+    micrograph.construct_klt_templates_gpu(picker)
     print("done constructing klt templates")
+    print(datetime.now()-start)

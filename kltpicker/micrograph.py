@@ -1,16 +1,15 @@
 import numpy as np
-from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, q_convolve
+import cupy as cp
+from .util import f_trans_2, stdfilter, trig_interpolation, trig_interpolation_gpu, radial_avg, radial_avg_gpu, fftcorrelate, q_convolve
 from scipy import signal
-from numpy.matlib import repmat
-from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat, als_find_min
-from multiprocessing import Pool, cpu_count
+from .cryo_utils import lgwt, cryo_epsds, cryo_epsds_gpu, cryo_prewhiten, picking_from_scoring_mat, als_find_min
 from numpy.linalg import eigh
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
 PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2 ** 10
-NUM_QUAD_KER = 2 ** 10
+NUM_QUAD_NYS = 2 ** 7
+NUM_QUAD_KER = 2 ** 7
 MAX_FUN = 400
 
 
@@ -94,9 +93,9 @@ class Micrograph:
         M = (m ** 2).astype(int)
         L = int(patch_size)
         s = np.zeros((M, L))
-        num_quads = 2 ** 9
+        num_quads = 2 ** 7
         quad, nodes = lgwt(num_quads, -np.pi, np.pi)
-        x = repmat(quad, num_quads, 1)
+        x = np.tile(quad, (num_quads, 1))
         y = x.transpose()
         rho_mat = np.sqrt(x ** 2 + y ** 2)
         rho_mat = np.where(rho_mat > np.pi, 0, rho_mat)
@@ -137,9 +136,9 @@ class Micrograph:
         var_vec.sort()
         j = np.floor(0.25 * var_vec.size).astype('int')
         noise_var_approx = np.mean(var_vec[0:j])
-        num_of_quad = 2 ** 12
+        num_of_quad = 2 ** 7
         quad, nodes = lgwt(num_of_quad, -np.pi, np.pi)
-        y = repmat(quad, num_of_quad, 1)
+        y = np.tile(quad, (num_of_quad, 1))
         x = y.transpose()
         rho_mat = np.sqrt(x ** 2 + y ** 2)
         rho_mat = np.where(rho_mat > np.pi, 0, rho_mat)
@@ -164,6 +163,91 @@ class Micrograph:
         self.approx_noise_var = noise_var_approx
         self.r = r
         self.stop_par = stop_par
+
+    def estimate_rpsd_gpu(self, patch_size, max_iter):
+        """Approximate clean and noise RPSD per micrograph, using CUDA."""
+        micro_size = self.noise_mc.shape[0]
+        m = np.floor(micro_size / patch_size)
+        M = (m ** 2).astype(int)
+        L = int(patch_size)
+        s = cp.zeros((M, L))
+        num_quads = 2 ** 7
+        quad, nodes = lgwt(num_quads, -np.pi, np.pi)
+        quad = cp.array(quad)
+        nodes = cp.array(nodes)
+        x = cp.tile(cp.array(quad), (num_quads, 1))
+        y = x.transpose()
+        rho_mat = cp.sqrt(x ** 2 + y ** 2)
+        rho_mat = cp.where(rho_mat > cp.pi, 0, rho_mat)
+        rho_samp, idx = cp.unique(rho_mat, return_inverse=True)
+        noise_mc = cp.array(self.noise_mc)
+        for k in range(M):
+            print(k)
+            row = cp.ceil((k + 1) / m).astype(int)
+            col = (k + 1 - (row - 1) * m).astype(int)
+            noisemc_block = noise_mc[(row - 1) * patch_size.astype(int):row * patch_size.astype(int),
+                            (col - 1) * patch_size.astype(int): col * patch_size.astype(int)]
+            noisemc_block = noisemc_block - cp.mean(noisemc_block)
+            psd_block = cryo_epsds_gpu(cp.expand_dims(noisemc_block, 2),
+                                   cp.where(cp.zeros((int(patch_size), int(patch_size))) == 0),
+                                   int(cp.floor(0.3 * patch_size)))
+            psd_block = psd_block[0]
+            [r_block, r] = radial_avg_gpu(psd_block, L)
+            block_var = cp.var(noisemc_block, ddof=1)
+            psd_rad = cp.abs(trig_interpolation_gpu(r * cp.pi, r_block, rho_samp))
+            psd_mat = cp.reshape(psd_rad[idx], [num_quads, num_quads])
+            var_psd = (1 / (2 * cp.pi) ** 2) * cp.dot(nodes, cp.dot(psd_mat, nodes.transpose()))
+            scaling_psd = block_var / var_psd
+            r_block = scaling_psd * r_block
+            s[k, :] = r_block
+        noisemc_block = noise_mc[0: patch_size.astype(int), patch_size.astype(int): 2 * patch_size.astype(int)]
+        noisemc_block = noisemc_block - cp.mean(noisemc_block)
+        psd_block = cryo_epsds_gpu(cp.expand_dims(noisemc_block, 2),
+                               cp.where(cp.zeros((int(patch_size), int(patch_size))) == 0),
+                               cp.floor(0.3 * patch_size).astype(int))
+        psd_block = psd_block[0]
+        _, r = radial_avg_gpu(psd_block, L)
+        
+        s = cp.asnumpy(s)
+
+        # find min arg using ALS:
+        approx_clean_psd, approx_noise_psd, alpha, stop_par = als_find_min(s, EPS, max_iter)
+        std_mat = stdfilter(self.noise_mc, patch_size)
+        var_mat = std_mat ** 2
+        cut = int((patch_size - 1) / 2 + 1)
+        var_mat = var_mat[cut - 1:-cut, cut - 1:-cut]
+        var_vec = var_mat.transpose().flatten()
+        var_vec.sort()
+        j = np.floor(0.25 * var_vec.size).astype('int')
+        noise_var_approx = np.mean(var_vec[0:j])
+        num_of_quad = 2 ** 7
+        quad, nodes = lgwt(num_of_quad, -np.pi, np.pi)
+        y = np.tile(quad, (num_of_quad, 1))
+        x = y.transpose()
+        rho_mat = np.sqrt(x ** 2 + y ** 2)
+        rho_mat = np.where(rho_mat > np.pi, 0, rho_mat)
+        rho_samp, idx = np.unique(rho_mat, return_inverse=True)
+        clean_psd_nodes = np.abs(trig_interpolation(r * np.pi, approx_clean_psd, rho_samp))
+        noise_psd_nodes = np.abs(trig_interpolation(r * np.pi, approx_noise_psd, rho_samp))
+        clean_psd_mat = np.reshape(clean_psd_nodes[idx], (num_of_quad, num_of_quad))
+        noise_psd_mat = np.reshape(noise_psd_nodes[idx], (num_of_quad, num_of_quad))
+        scaling_psd_approx = (np.linalg.multi_dot([nodes, noise_psd_mat, nodes.transpose()]) - (
+                4 * np.pi ** 2) * noise_var_approx) / np.linalg.multi_dot([nodes, clean_psd_mat, nodes.transpose()])
+        noise_psd_approx_sigma = approx_noise_psd - scaling_psd_approx * approx_clean_psd
+        noise_psd_approx_sigma = noise_psd_approx_sigma.clip(min=0, max=None)
+        s_mean = np.mean(s, 0)
+        s_mean_psd_nodes = np.abs(trig_interpolation(r * np.pi, s_mean, rho_samp))
+        s_mean_psd_mat = np.reshape(s_mean_psd_nodes[idx], (num_of_quad, num_of_quad))
+        s_mean_var_psd = (1 / (2 * np.pi) ** 2) * np.linalg.multi_dot([nodes, s_mean_psd_mat, nodes.transpose()])
+        clean_var_psd = (1 / (2 * np.pi) ** 2) * np.linalg.multi_dot([nodes, clean_psd_mat, nodes.transpose()])
+        clean_var = s_mean_var_psd - noise_var_approx
+        approx_scaling = clean_var / clean_var_psd
+        self.approx_clean_psd = approx_scaling * approx_clean_psd
+        self.approx_noise_psd = noise_psd_approx_sigma
+        self.approx_noise_var = noise_var_approx
+        self.r = r
+        self.stop_par = stop_par
+
 
     def prewhiten_micrograph(self):
         r = np.floor((self.mc_size[1] - 1) / 2).astype('int')
@@ -205,8 +289,8 @@ class Micrograph:
             eig_val_tot[n, :] = eig_vals
         r_idx = np.arange(0, NUM_QUAD_NYS)
         c_idx = np.arange(0, kltpicker.max_order)
-        r_idx = repmat(r_idx, 1, kltpicker.max_order)
-        c_idx = repmat(c_idx, NUM_QUAD_NYS, 1)
+        r_idx = np.tile(r_idx, kltpicker.max_order)
+        c_idx = np.tile(c_idx, (NUM_QUAD_NYS, 1))
         eig_val_tot = eig_val_tot.flatten()
         r_idx = r_idx.transpose().flatten()
         c_idx = c_idx.transpose().flatten()
@@ -219,7 +303,7 @@ class Micrograph:
         cum_sum_eig_val = np.cumsum(eig_val_tot / sum_of_eig)
         last_eig_idx = (cum_sum_eig_val > PERCENT_EIG_FUNC).argmax() + 1
         eig_val = np.zeros((2 * last_eig_idx, 1))
-        eig_func = np.zeros((2 * last_eig_idx, kltpicker.rsamp_length))
+        eig_func = np.zeros((2 * last_eig_idx, kltpicker.cosine.shape[1]))
         count = 0
         for i in range(last_eig_idx):
             order = c_idx[i]
@@ -230,6 +314,7 @@ class Micrograph:
                                                                        kltpicker.j_r_rho[order, :, :].transpose()])
             v_correct = (1 / np.sqrt(kltpicker.quad_nys)) * eig_func_tot[order, :, idx_of_eig]
             v_nys = np.dot(h_samp, (kltpicker.quad_nys * v_correct)) / eig_val_tot[i]
+            v_nys = cp.reshape(v_nys[kltpicker.idx_rsamp], kltpicker.idx_rsamp.shape)
             if not order:
                 eig_func[count, :] = (1 / np.sqrt(2 * np.pi)) * v_nys
                 eig_val[count, 0] = eig_val_tot[i]
@@ -250,6 +335,82 @@ class Micrograph:
         self.eig_func = eig_func
         self.eig_val = eig_val
         self.num_of_func = num_of_fun
+
+    def construct_klt_templates_gpu(self, kltpicker):
+        """Constructing the KLTpicker templates as the eigenfunctions of a given kernel."""
+        mempool = cp.get_default_memory_pool()
+        pinned_mempool = cp.get_default_pinned_memory_pool()
+        eig_func_tot = cp.zeros((kltpicker.max_order, NUM_QUAD_NYS, NUM_QUAD_NYS))
+        eig_val_tot = cp.zeros((kltpicker.max_order, NUM_QUAD_NYS))
+        sqrt_rr = cp.sqrt(cp.array(kltpicker.r_r))
+        d_rho_psd_quad_ker = cp.diag(cp.array(kltpicker.rho)) * cp.diag(cp.array(self.psd)) * cp.diag(cp.array(kltpicker.quad_ker))
+        sqrt_diag_quad_nys = cp.sqrt(cp.diag(cp.array(kltpicker.quad_nys)))
+        j_r_rho = cp.array(kltpicker.j_r_rho)
+        for n in range(kltpicker.max_order):
+            h_nodes = sqrt_rr * cp.dot(j_r_rho[n, :, :], cp.dot(d_rho_psd_quad_ker,
+                                                     j_r_rho[n, :, :].transpose()))
+            tmp = cp.dot(sqrt_diag_quad_nys, cp.dot(h_nodes, sqrt_diag_quad_nys.transpose()))
+            eig_vals, eig_funcs = cp.linalg.eigh(tmp)
+            eig_vals = cp.real(eig_vals)
+            eig_vals = eig_vals[::-1]  # Descending.
+            eig_funcs = eig_funcs[:, ::-1]
+            eig_vals = cp.where(cp.abs(eig_vals) < np.spacing(1), 0, eig_vals)
+            eig_funcs[:, eig_vals == 0] = 0
+            eig_func_tot[n, :, :] = eig_funcs
+            eig_val_tot[n, :] = eig_vals
+            
+        c_idx = cp.tile(cp.arange(0, kltpicker.max_order), (NUM_QUAD_NYS,1)).transpose().flatten()
+        r_idx = cp.tile(cp.arange(0, NUM_QUAD_NYS), kltpicker.max_order)
+        eig_val_tot = eig_val_tot.flatten()
+        sort_idx = cp.argsort(eig_val_tot)
+        sort_idx = sort_idx[::-1]
+        eig_val_tot = eig_val_tot[sort_idx]
+        r_idx = r_idx[sort_idx]
+        c_idx = c_idx[sort_idx]
+        sum_of_eig = cp.sum(eig_val_tot)
+        cum_sum_eig_val = cp.cumsum(eig_val_tot / sum_of_eig)
+        last_eig_idx = (cum_sum_eig_val > PERCENT_EIG_FUNC).argmax() + 1
+        last_eig_idx = int(last_eig_idx)
+        eig_val = cp.zeros((2 * last_eig_idx, 1))
+        eig_func = cp.zeros((2 * last_eig_idx, kltpicker.cosine.shape[1]))
+        count = 0
+        rsamp_r = cp.array(kltpicker.rsamp_r)
+        rho = cp.array(kltpicker.rho)
+        psd = cp.array(self.psd)
+        quad_ker = cp.array(kltpicker.quad_ker)
+        quad_nys = cp.array(kltpicker.quad_nys)
+        cosine = cp.array(kltpicker.cosine)
+        sine = cp.array(kltpicker.sine)
+        j_samp = cp.array(kltpicker.j_samp)
+        for i in range(last_eig_idx):
+            order = c_idx[i]
+            idx_of_eig = r_idx[i]
+            h_samp = cp.sqrt(rsamp_r) * cp.dot(j_samp[order, :, :], cp.dot(cp.diag(rho * psd * quad_ker),
+                                                                       j_r_rho[order, :, :].transpose()))
+            v_correct = (1 / cp.sqrt(quad_nys)) * eig_func_tot[order, :, idx_of_eig]
+            v_nys = cp.dot(h_samp, (quad_nys * v_correct)) / eig_val_tot[i]
+            v_nys = cp.reshape(v_nys[kltpicker.idx_rsamp], kltpicker.idx_rsamp.shape)
+            if not order:
+                eig_func[count, :] = (1 / cp.sqrt(2 * np.pi)) * v_nys
+                eig_val[count, 0] = eig_val_tot[i]
+                count += 1
+            else:
+                eig_func[count, :] = cp.sqrt((1 / cp.pi)) * v_nys * cosine[order, :]
+                eig_val[count, 0] = eig_val_tot[i]
+                count += 1
+                eig_func[count, :] = cp.sqrt((1 / np.pi)) * v_nys * sine[order, :]
+                eig_val[count, 0] = eig_val_tot[i]
+                count += 1
+        eig_val = eig_val[eig_val > 0]
+        eig_func = eig_func[0:len(eig_val), :]
+        if eig_func.shape[0] < MAX_FUN:
+            num_of_fun = eig_func.shape[0]
+        else:
+            num_of_fun = MAX_FUN
+        self.eig_func = eig_func
+        self.eig_val = eig_val
+        self.num_of_func = num_of_fun
+
 
     def detect_particles(self, kltpicker):
         """
@@ -274,22 +435,21 @@ class Micrograph:
         num_of_patch_row = last_block_row
         num_of_patch_col = last_block_col
         q = q.transpose().copy()
-        #v = np.zeros((num_of_patch_row, self.num_of_func, num_of_patch_col), order='F')
-        # for i in range(self.num_of_func):
-        #     q_tmp = np.reshape(q[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
-        #     q_tmp = q_tmp - np.mean(q_tmp)
-        #     q_tmp = np.flip(q_tmp, 1)
-        #     v_tmp = signal.fftconvolve(self.noise_mc, q_tmp, 'valid')
-        #     v[:, i, :] = v_tmp
-        pool = Pool(max(cpu_count()-2, 1))
-        v_res = pool.starmap(q_convolve,
-                             [(i, q, kltpicker.patch_size_func, self.noise_mc) for i in range(self.num_of_func)])
-        pool.close()
-        pool.join()
-        t_mat = t_mat.transpose().copy()
-        v = np.squeeze(v_res) #.transpose()
-        log_test_mat_rows = [np.sum((t_mat @ v[:, :, j]) * v[:, :, j], 0) for j in range(num_of_patch_col)]
-        log_test_mat = np.squeeze(log_test_mat_rows) - mu
+        v = np.zeros((num_of_patch_row, num_of_patch_col, self.num_of_func), order='F')
+        for i in range(self.num_of_func):
+            q_tmp = np.reshape(q[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+            q_tmp = q_tmp - np.mean(q_tmp)
+            q_tmp = np.flip(q_tmp, 1)
+            v_tmp = signal.fftconvolve(self.noise_mc, q_tmp, 'valid')
+            v[:, :, i] = v_tmp
+        
+        log_test_mat = np.zeros((num_of_patch_row, num_of_patch_col))
+        for j in range(num_of_patch_col):
+            vc = np.reshape(v[:, j, :], (num_of_patch_row, self.num_of_func))
+            log_test_mat[:, j] = np.sum(np.dot(vc, t_mat) * vc, 1) - mu
+            
+        #log_test_mat_rows = [np.sum((t_mat @ v[:, :, j]) * v[:, :, j], 0) for j in range(num_of_patch_col)]
+        #log_test_mat = np.squeeze(log_test_mat_rows) - mu
         log_test_mat = log_test_mat.transpose()
         neigh = np.ones((kltpicker.patch_size_func, kltpicker.patch_size_func))
         log_test_n = signal.fftconvolve(log_test_mat, neigh, 'valid')

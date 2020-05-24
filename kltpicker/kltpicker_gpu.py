@@ -7,8 +7,8 @@ from multiprocessing import Pool, cpu_count
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
 PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2 ** 7
-NUM_QUAD_KER = 2 ** 7
+NUM_QUAD_NYS = 2 ** 10
+NUM_QUAD_KER = 2 ** 10
 MAX_FUN = 400
 
 
@@ -90,7 +90,7 @@ class KLTPicker:
         self.num_of_particles = args.num_of_particles
         self.num_of_noise_images = args.num_of_noise_images
         self.threshold = args.threshold
-        self.show_figures = 0
+        self.show_figures = 0  # args.show_figures
         patch_size = np.floor(0.8 * self.mgscale * args.particle_size)  # need to put the 0.8 somewhere else.
         if np.mod(patch_size, 2) == 0:
             patch_size -= 1
@@ -109,7 +109,8 @@ class KLTPicker:
         x = np.arange(-radmax, radmax + 1, 1).astype('float64')
         X, Y = np.meshgrid(x, x)
         rad_mat = np.sqrt(np.square(X) + np.square(Y))
-        rsamp, idx_rsamp = np.unique(rad_mat.transpose().flatten(), return_inverse=True)
+        rsamp = rad_mat.transpose().flatten()
+        self.rsamp_length = rsamp.size
         theta = np.arctan2(Y, X).transpose().flatten()
         rho, quad_ker = lgwt(NUM_QUAD_KER, 0, np.pi)
         rho = np.flipud(rho.astype('float64'))
@@ -143,5 +144,4 @@ class KLTPicker:
         self.rsamp_r = rsamp_r
         self.r_r = r_r
         self.rad_mat = rad_mat
-        self.idx_rsamp = idx_rsamp
 
