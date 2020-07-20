@@ -87,7 +87,7 @@ def radial_avg(z, m):
     X = Y.transpose()
     r = np.sqrt(np.square(X) + np.square(Y))
     dr = 1 / (m - 1)
-    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1) # endpoint=True)
+    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1)
     R = (rbins[0:-1] + rbins[1:]) / 2
     zr = np.zeros(m)
     for j in range(m - 1):
@@ -98,7 +98,7 @@ def radial_avg(z, m):
         else:
             zr[j] = np.nan
     bins = np.where(np.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1)))
+    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1))[0])
     if n != 0:
         zr[m - 1] = np.sum(z[bins]) / n
     else:
@@ -135,7 +135,7 @@ def radial_avg_gpu(z, m):
         else:
             zr[j] = cp.nan
     bins = cp.where(cp.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(cp.nonzero(cp.logical_and(r >= rbins[m - 1], r <= 1)))
+    n = len(cp.nonzero(cp.logical_and(r >= rbins[m - 1], r <= 1))[0])
     if n != 0:
         zr[m - 1] = cp.sum(z[bins]) / n
     else:

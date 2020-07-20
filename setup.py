@@ -14,7 +14,8 @@ setup(name='kltpicker',
           'argparse',
           'scipy',
           'pyfftw',
-          'tqdm'
+          'tqdm',
+          'cupy'
       ],
       python_requires='>=3',
       scripts=['bin/KLTPicker.py'],

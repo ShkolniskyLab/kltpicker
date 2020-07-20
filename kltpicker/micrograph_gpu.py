@@ -7,8 +7,8 @@ from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_m
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
 PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2 ** 10
-NUM_QUAD_KER = 2 ** 10
+NUM_QUAD_NYS = 2 ** 7
+NUM_QUAD_KER = 2 ** 7
 MAX_FUN = 400
 
 
@@ -92,7 +92,7 @@ class Micrograph:
         M = (m ** 2).astype(int)
         L = int(patch_size)
         s = cp.zeros((M, L))
-        num_quads = 2 ** 9
+        num_quads = 2 ** 7
         quad, nodes = lgwt(num_quads, -cp.pi, cp.pi)
         x = repmat(quad, num_quads, 1)
         y = x.transpose()
@@ -135,7 +135,7 @@ class Micrograph:
         var_vec.sort()
         j = cp.floor(0.25 * var_vec.size).astype('int')
         noise_var_approx = cp.mean(var_vec[0:j])
-        num_of_quad = 2 ** 12
+        num_of_quad = 2 ** 7
         quad, nodes = lgwt(num_of_quad, -cp.pi, cp.pi)
         y = repmat(quad, num_of_quad, 1)
         x = y.transpose()

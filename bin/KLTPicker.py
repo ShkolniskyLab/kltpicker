@@ -18,9 +18,6 @@ warnings.filterwarnings("ignore")
 # Globals:
 PERCENT_EIG_FUNC = 0.99
 EPS = 10 ** (-2)  # Convergence term for ALS.
-NUM_QUAD_NYS = 2 ** 10
-NUM_QUAD_KER = 2 ** 10
-MAX_FUN = 400
 
 
 def parse_args():
@@ -44,7 +41,6 @@ def parse_args():
     parser.add_argument('--preprocess', action='store_false', help='Do not run preprocessing.', default=True)
     args = parser.parse_args()
     return args
-
 
 def process_micrograph(micrograph, picker):
     micrograph.cutoff_filter(picker.patch_size)
@@ -87,12 +83,9 @@ def main():
         print("Could not find any .mrc files in %s. \nExiting..." % args.input_dir)
         exit(0)
     picker = KLTPicker(args)
-    if args.preprocess:
-        print("Preprocessing...")
-        picker.preprocess()
-        print("Preprocess finished.")
-    else:
-        print("Skipping preprocessing.")
+    print("Preprocessing...")
+    picker.preprocess()
+    print("Preprocess finished.")
     mrc_files = picker.input_dir.glob("*.mrc")
     for mrc_file in tqdm(list(mrc_files), desc='Picking particles from micrographs...'):
         micrograph = get_micrograph(mrc_file, picker.mgscale)

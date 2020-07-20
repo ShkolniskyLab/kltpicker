@@ -7,8 +7,8 @@ from multiprocessing import Pool, cpu_count
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
 PERCENT_EIG_FUNC = 0.99
-NUM_QUAD_NYS = 2 ** 10
-NUM_QUAD_KER = 2 ** 10
+NUM_QUAD_NYS = 2 ** 7
+NUM_QUAD_KER = 2 ** 7
 MAX_FUN = 400
 
 
