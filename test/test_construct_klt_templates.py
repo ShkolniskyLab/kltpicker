@@ -5,8 +5,9 @@ from kltpicker import Micrograph
 import mrcfile
 from kltpicker.cryo_utils import downsample
 from pathlib import Path
-from datetime import datetime
 
+TEST_DATA = "/home/dalitcohen/Documents/projects/test/numpy/"
+TEST_DATA_CONSTRUCT = "/home/dalitcohen/Documents/projects/test/numpy/before_construct_klt_templates/"
 
 parser = argparse.ArgumentParser()
 args = parser.parse_args()
@@ -19,10 +20,6 @@ args.num_of_particles = -1
 args.num_of_noise_images =0
 args.threshold = 0
 args.max_iter = 6 * (10 ** 4)
-
-
-def comp(a,b):
-    return np.linalg.norm(a-b)/np.linalg.norm(a)
 
 def get_micrograph(mrc_file, mgscale):
     """Reads .mrc files and downsamples them."""
@@ -44,29 +41,29 @@ def get_micrograph(mrc_file, mgscale):
 
 if __name__ == "__main__":
     picker = KLTPicker(args)
-    picker.quad_ker = np.load("quad_ker.npy")
-    picker.quad_nys = np.load("quad_nys.npy")
-    picker.rho = np.load("rho.npy")
-    picker.j_r_rho = np.load("j_r_rho.npy")
-    picker.j_samp = np.load("j_samp.npy")
-    picker.cosine = np.load("cosine.npy")
-    picker.sine = np.load("sine.npy")
-    picker.rsamp_r = np.load("rsamp_r.npy")
-    picker.r_r = np.load("r_r.npy")
-    picker.rad_mat = np.load("rad_mat.npy")
+    # get the data:
+    picker.quad_ker = np.load(TEST_DATA + "quad_ker.npy")
+    picker.quad_nys = np.load(TEST_DATA + "quad_nys.npy")
+    picker.rho = np.load(TEST_DATA + "rho.npy")
+    picker.j_r_rho = np.load(TEST_DATA + "j_r_rho.npy")
+    picker.j_samp = np.load(TEST_DATA + "j_samp.npy")
+    picker.cosine = np.load(TEST_DATA + "cosine.npy")
+    picker.sine = np.load(TEST_DATA + "sine.npy")
+    picker.rsamp_r = np.load(TEST_DATA + "rsamp_r.npy")
+    picker.r_r = np.load(TEST_DATA + "r_r.npy")
+    picker.rad_mat = np.load(TEST_DATA + "rad_mat.npy")
+    picker.idx_rsamp = np.load(TEST_DATA + "idx_rsamp.npy")
     picker.rsamp_length = 1521
     picker.input_dir = Path("/home/dalitcohen/Documents/mrcs")
     picker.mgscale = 100 / 300
     mrc_files = picker.input_dir.glob("*.mrc")
     micrograph = get_micrograph(list(mrc_files)[0], picker.mgscale)
-    micrograph.psd = np.load("psd.npy")
-    micrograph.approx_noise_psd = np.load("approx_noise_psd.npy")
-    micrograph.approx_clean_psd = np.load("approx_clean_psd.npy")
-    micrograph.approx_noise_var = np.load("approx_noise_var.npy")
-    micrograph.noise_mc = np.load("noise_mc.npy")
-    micrograph.r = np.load("r.npy")
-    print("starting")
-    start = datetime.now()
-    micrograph.construct_klt_templates_gpu(picker)
-    print("done constructing klt templates")
-    print(datetime.now()-start)
+    micrograph.psd = np.load(TEST_DATA_CONSTRUCT + "psd.npy")
+    micrograph.approx_noise_psd = np.load(TEST_DATA_CONSTRUCT + "approx_noise_psd.npy")
+    micrograph.approx_clean_psd = np.load(TEST_DATA_CONSTRUCT + "approx_clean_psd.npy")
+    micrograph.approx_noise_var = np.load(TEST_DATA_CONSTRUCT + "approx_noise_var.npy")
+    micrograph.noise_mc = np.load(TEST_DATA_CONSTRUCT + "noise_mc.npy")
+    micrograph.r = np.load(TEST_DATA_CONSTRUCT + "r.npy")
+    
+    micrograph.construct_klt_templates(picker)
+    print("done")

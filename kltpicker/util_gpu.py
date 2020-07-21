@@ -1,15 +1,7 @@
 import cupy as cp
 from scipy import signal
 from scipy.ndimage import uniform_filter
-#from scipy.fftpack import fftshift
 from cupy.fft import fftshift
-
-def q_convolve(i, q, patch_size_func, noise_mc):
-    q_tmp = cp.reshape(q[i, :], (patch_size_func, patch_size_func)).transpose()
-    q_tmp = q_tmp - cp.mean(q_tmp)
-    q_tmp = cp.flip(q_tmp, 1)
-    v_tmp = signal.fftconvolve(noise_mc, q_tmp, 'valid')
-    return v_tmp.astype("float32")
 
 
 def fftcorrelate(image, filt):
@@ -96,7 +88,7 @@ def radial_avg(z, m):
         else:
             zr[j] = cp.nan
     bins = cp.where(cp.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(cp.nonzero(cp.logical_and(r >= rbins[m - 1], r <= 1)))
+    n = len(cp.nonzero(cp.logical_and(r >= rbins[m - 1], r <= 1))[0])
     if n != 0:
         zr[m - 1] = cp.sum(z[bins]) / n
     else:

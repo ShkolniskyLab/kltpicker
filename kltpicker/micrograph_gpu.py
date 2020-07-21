@@ -266,25 +266,34 @@ class Micrograph:
                 self.approx_noise_var * cp.eye(self.num_of_func))
         kappa_inv = cp.linalg.inv(kappa)
         t_mat = (1 / self.approx_noise_var) * cp.eye(self.num_of_func) - kappa_inv
+        
+        [D, P] = cp.linalg.eigh(t_mat)
+        D = D[::-1]  # Descending.
+        P = P[:, ::-1]
+        p_full = cp.zeros(q.shape)
+        p_full[0:t_mat.shape[0], 0:t_mat.shape[1]] = P
+        
         mu = cp.linalg.slogdet((1 / self.approx_noise_var) * kappa)[1]
         last_block_row = self.mc_size[0] - kltpicker.patch_size_func + 1
         last_block_col = self.mc_size[1] - kltpicker.patch_size_func + 1
         num_of_patch_row = last_block_row
         num_of_patch_col = last_block_col
-        q = q.transpose().copy()
-        v = cp.zeros((num_of_patch_row, self.num_of_func, num_of_patch_col), order='F')
+        
+        qp = q @ p_full
+        qp = qp.transpose().copy()
+        
+        log_test_mat = cp.zeros((num_of_patch_row, num_of_patch_col))
         for i in range(self.num_of_func):
-            q_tmp = cp.reshape(q[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
-            q_tmp = q_tmp - cp.mean(q_tmp)
-            q_tmp = cp.flip(q_tmp, 1)
-            v_tmp = signal.fftconvolve(self.noise_mc, q_tmp, 'valid')
-            v[:, i, :] = v_tmp
-        t_mat = t_mat.transpose().copy()
-        log_test_mat_rows = [cp.sum((t_mat @ v[:, :, j]) * v[:, :, j], 0) for j in range(num_of_patch_col)]
-        log_test_mat = cp.squeeze(log_test_mat_rows) - mu
-        log_test_mat = log_test_mat.transpose()
+            qp_tmp = cp.reshape(qp[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+            
+            qp_tmp = cp.flip(cp.flip(qp_tmp, 0), 1)
+            
+            scoreTmp = signal.fftconvolve(self.noise_mc, qp_tmp,'valid')
+            log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
+        
+        log_test_mat = log_test_mat.transpose() - mu
         neigh = cp.ones((kltpicker.patch_size_func, kltpicker.patch_size_func))
         log_test_n = signal.fftconvolve(log_test_mat, neigh, 'valid')
-        [num_picked_particles, num_picked_noise] = picking_from_scoring_mat(log_test_n, self.mrc_name, kltpicker,
+        [num_picked_particles, num_picked_noise] = picking_from_scoring_mat(log_test_n.transpose(), self.mrc_name, kltpicker,
                                                                             self.mg_big_size)
         return num_picked_particles, num_picked_noise

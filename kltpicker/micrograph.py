@@ -1,6 +1,6 @@
 import numpy as np
 import cupy as cp
-from .util import f_trans_2, stdfilter, trig_interpolation, trig_interpolation_gpu, radial_avg, radial_avg_gpu, fftcorrelate, q_convolve
+from .util import f_trans_2, stdfilter, trig_interpolation, trig_interpolation_gpu, radial_avg, radial_avg_gpu, fftcorrelate
 from scipy import signal
 from .cryo_utils import lgwt, cryo_epsds, cryo_epsds_gpu, cryo_prewhiten, picking_from_scoring_mat, als_find_min
 from numpy.linalg import eigh
@@ -111,7 +111,6 @@ class Micrograph:
                                    np.floor(0.3 * patch_size).astype(int))
             psd_block = psd_block[0]
             [r_block, r] = radial_avg(psd_block, L)
-            are = r
             block_var = np.var(noisemc_block, ddof=1)
             psd_rad = np.abs(trig_interpolation(r * np.pi, r_block, rho_samp))
             psd_mat = np.reshape(psd_rad[idx], [num_quads, num_quads])
@@ -128,7 +127,6 @@ class Micrograph:
         _, r = radial_avg(psd_block, L)
 
         # find min arg using ALS:
-        ASS = s
         approx_clean_psd, approx_noise_psd, alpha, stop_par = als_find_min(s, EPS, max_iter)
         std_mat = stdfilter(self.noise_mc, patch_size)
         var_mat = std_mat ** 2
@@ -340,8 +338,6 @@ class Micrograph:
 
     def construct_klt_templates_gpu(self, kltpicker):
         """Constructing the KLTpicker templates as the eigenfunctions of a given kernel."""
-        mempool = cp.get_default_memory_pool()
-        pinned_mempool = cp.get_default_pinned_memory_pool()
         eig_func_tot = cp.zeros((kltpicker.max_order, NUM_QUAD_NYS, NUM_QUAD_NYS))
         eig_val_tot = cp.zeros((kltpicker.max_order, NUM_QUAD_NYS))
         sqrt_rr = cp.sqrt(cp.array(kltpicker.r_r))

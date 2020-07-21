@@ -6,14 +6,6 @@ from scipy.fftpack import fftshift
 from numba import jit
 
 
-def q_convolve(i, q, patch_size_func, noise_mc):
-    q_tmp = np.reshape(q[i, :], (patch_size_func, patch_size_func)).transpose()
-    q_tmp = q_tmp - np.mean(q_tmp)
-    q_tmp = np.flip(q_tmp, 1)
-    v_tmp = signal.fftconvolve(noise_mc, q_tmp, 'valid')
-    return v_tmp.astype("float32")
-
-
 def fftcorrelate(image, filt):
     filt = np.rot90(filt, 2)
     pad_shift = 1 - np.mod(np.array(filt.shape), 2)
@@ -68,7 +60,7 @@ def f_trans_2(b):
     h = np.rot90(h, k=2)
     return h
 
-
+@jit(nopython=True)
 def radial_avg(z, m):
     """
     Radially average 2-D square matrix z into m bins.
@@ -83,9 +75,48 @@ def radial_avg(z, m):
     :return R: Mid-points of the bins.
     """
     N = z.shape[1]
-    Y = np.repeat(np.arange(N) * 2 / (N - 1) - 1, N).reshape((N, N))
-    X = Y.transpose()
-    r = np.sqrt(np.square(X) + np.square(Y))
+    X = np.array([[x*2/(N-1) -1 for x in range(N)] for x in range(N)])
+    Y = X.transpose()
+    r = (X ** 2 + Y ** 2) ** 0.5
+    dr = 1 / (m - 1)
+    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1)
+    R = (rbins[0:-1] + rbins[1:]) / 2
+    zr = np.zeros(m)
+    for j in range(m - 1):
+        bins = np.where(np.logical_and(r >= rbins[j], r < rbins[j + 1]))
+        n = len(np.nonzero(np.logical_and(r >= rbins[j], r < rbins[j + 1]))[0])
+        if n:
+            for (row, col) in zip(bins[0], bins[1]):
+                zr[j] += z[row, col] / n
+        else:
+            zr[j] = np.nan
+    bins = np.where(np.logical_and(r >= rbins[m - 1], r <= 1))
+    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1))[0])
+    if n != 0:
+        for (row, col) in zip(bins[0], bins[1]):
+            zr[m - 1] += z[row, col] / n
+    else:
+        zr[m - 1] = np.nan
+    return zr, R
+
+
+def radial_avg_old(z, m):
+    """
+    Radially average 2-D square matrix z into m bins.
+
+    Computes the average along the radius of a unit circle
+    inscribed in the square matrix z. The average is computed in m bins. The radial average is not computed beyond
+    the unit circle, in the corners of the matrix z. The radial average is returned in zr and the mid-points of the
+    m bins are returned in vector R.
+    :param z: 2-D square matrix.
+    :param m: Number of bins.
+    :return zr: Radial average of z.
+    :return R: Mid-points of the bins.
+    """
+    N = z.shape[1]
+    X = np.array([[x*2/(N-1) -1 for x in range(N)] for x in range(N)])
+    Y = X.transpose()
+    r = (X ** 2 + Y ** 2) ** 0.5
     dr = 1 / (m - 1)
     rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1)
     R = (rbins[0:-1] + rbins[1:]) / 2
@@ -104,6 +135,8 @@ def radial_avg(z, m):
     else:
         zr[m - 1] = np.nan
     return zr, R
+
+
 
 
 def radial_avg_gpu(z, m):
