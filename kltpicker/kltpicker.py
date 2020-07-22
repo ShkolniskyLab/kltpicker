@@ -25,7 +25,7 @@ class KLTPicker:
         Directory from which to read .mrc files.
     output_dir : str
         Output directory in which to write results.
-    gpu_use : bool
+    no_gpu : bool
         Optional - whether to use GPU or not.
     mgscale : float
         Scaling parameter.
@@ -74,7 +74,7 @@ class KLTPicker:
         self.output_dir = Path(args.output_dir)
         self.output_noise = self.output_dir / ('PickedNoise_ParticleSize_%d' % args.particle_size)
         self.output_particles = self.output_dir / ('PickedParticles_ParticleSize_%d' % args.particle_size)
-        self.gpu_use = args.gpu_use
+        self.no_gpu = args.no_gpu
         self.mgscale = 100 / args.particle_size
         self.max_order = args.max_order
         self.quad_ker = 0

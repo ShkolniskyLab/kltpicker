@@ -1,6 +1,6 @@
 import numpy as np
 import cupy as cp
-from .util import f_trans_2, stdfilter, trig_interpolation, trig_interpolation_gpu, radial_avg, radial_avg_gpu, fftcorrelate
+from .util import f_trans_2, stdfilter, trig_interpolation, trig_interpolation_gpu, radial_avg, radial_avg_gpu, fftcorrelate, fftconvolve2d_cp
 from scipy import signal
 from .cryo_utils import lgwt, cryo_epsds, cryo_epsds_gpu, cryo_prewhiten, picking_from_scoring_mat, als_find_min
 from numpy.linalg import eigh
@@ -92,7 +92,6 @@ class Micrograph:
         m = np.floor(micro_size / patch_size)
         M = (m ** 2).astype(int)
         L = int(patch_size)
-        s = np.zeros((M, L))
         num_quads = 2 ** 7
         quad, nodes = lgwt(num_quads, -np.pi, np.pi)
         x = np.tile(quad, (num_quads, 1))
@@ -100,24 +99,51 @@ class Micrograph:
         rho_mat = np.sqrt(x ** 2 + y ** 2)
         rho_mat = np.where(rho_mat > np.pi, 0, rho_mat)
         rho_samp, idx = np.unique(rho_mat, return_inverse=True)
-        for k in range(M):
-            row = np.ceil((k + 1) / m).astype(int)
-            col = (k + 1 - (row - 1) * m).astype(int)
-            noisemc_block = self.noise_mc[(row - 1) * patch_size.astype(int):row * patch_size.astype(int),
-                            (col - 1) * patch_size.astype(int): col * patch_size.astype(int)]
-            noisemc_block = noisemc_block - np.mean(noisemc_block)
-            psd_block = cryo_epsds(noisemc_block[:, :, np.newaxis],
-                                   np.where(np.zeros((int(patch_size), int(patch_size))) == 0),
-                                   np.floor(0.3 * patch_size).astype(int))
-            psd_block = psd_block[0]
-            [r_block, r] = radial_avg(psd_block, L)
-            block_var = np.var(noisemc_block, ddof=1)
-            psd_rad = np.abs(trig_interpolation(r * np.pi, r_block, rho_samp))
-            psd_mat = np.reshape(psd_rad[idx], [num_quads, num_quads])
-            var_psd = (1 / (2 * np.pi) ** 2) * np.linalg.multi_dot([nodes, psd_mat, nodes.transpose()])
-            scaling_psd = block_var / var_psd
-            r_block = scaling_psd * r_block
-            s[k, :] = r_block
+        if kltpicker.no_gpu:
+            s = np.zeros((M, L))
+            for k in range(M):
+                row = np.ceil((k + 1) / m).astype(int)
+                col = (k + 1 - (row - 1) * m).astype(int)
+                noisemc_block = self.noise_mc[(row - 1) * patch_size.astype(int):row * patch_size.astype(int),
+                                (col - 1) * patch_size.astype(int): col * patch_size.astype(int)]
+                noisemc_block = noisemc_block - np.mean(noisemc_block)
+                psd_block = cryo_epsds(noisemc_block[:, :, np.newaxis],
+                                       np.where(np.zeros((int(patch_size), int(patch_size))) == 0),
+                                       np.floor(0.3 * patch_size).astype(int))
+                psd_block = psd_block[0]
+                [r_block, r] = radial_avg(psd_block, L)
+                block_var = np.var(noisemc_block, ddof=1)
+                psd_rad = np.abs(trig_interpolation(r * np.pi, r_block, rho_samp))
+                psd_mat = np.reshape(psd_rad[idx], [num_quads, num_quads])
+                var_psd = (1 / (2 * np.pi) ** 2) * np.linalg.multi_dot([nodes, psd_mat, nodes.transpose()])
+                scaling_psd = block_var / var_psd
+                r_block = scaling_psd * r_block
+                s[k, :] = r_block
+        else:
+            s = cp.zeros((M, L))
+            noise_mc = cp.asarray(self.noise_mc)
+            rho_samp_cp = cp.asarray(rho_samp)
+            idx_cp = cp.asarray(idx)
+            nodes_cp = cp.asarray(nodes)
+            for k in range(M):
+                row = cp.ceil((k + 1) / m).astype(int)
+                col = (k + 1 - (row - 1) * m).astype(int)
+                noisemc_block = noise_mc[(row - 1) * patch_size.astype(int):row * patch_size.astype(int),
+                                (col - 1) * patch_size.astype(int): col * patch_size.astype(int)]
+                noisemc_block = noisemc_block - cp.mean(noisemc_block)
+                psd_block = cryo_epsds_cp(noisemc_block[:, :, cp.newaxis],
+                                       cp.where(cp.zeros((int(patch_size), int(patch_size))) == 0),
+                                       cp.floor(0.3 * patch_size).astype(int))
+                psd_block = psd_block[0]
+                [r_block, r] = radial_avg_cp(psd_block, L)
+                block_var = cp.var(noisemc_block, ddof=1)
+                psd_rad = cp.abs(trig_interpolation_cp(r * cp.pi, r_block, rho_samp_cp))
+                psd_mat = cp.reshape(psd_rad[idx_cp], [num_quads, num_quads])
+                var_psd = (1 / (2 * cp.pi) ** 2) * cp.linalg.multi_dot([nodes_cp, psd_mat, nodes_cp.transpose()])
+                scaling_psd = block_var / var_psd
+                r_block = scaling_psd * r_block
+                s[k, :] = r_block
+            s = cp.asnumpy(s)
         noisemc_block = self.noise_mc[0: patch_size.astype(int), patch_size.astype(int): 2 * patch_size.astype(int)]
         noisemc_block = noisemc_block - np.mean(noisemc_block)
         psd_block = cryo_epsds(noisemc_block[:, :, np.newaxis],
@@ -434,6 +460,7 @@ class Micrograph:
         p_full = np.zeros(q.shape)
         p_full[0:t_mat.shape[0], 0:t_mat.shape[1]] = P
         
+        
         mu = np.linalg.slogdet((1 / self.approx_noise_var) * kappa)[1]
         last_block_row = self.mc_size[0] - kltpicker.patch_size_func + 1
         last_block_col = self.mc_size[1] - kltpicker.patch_size_func + 1
@@ -443,14 +470,29 @@ class Micrograph:
         qp = q @ p_full
         qp = qp.transpose().copy()
         
-        log_test_mat = np.zeros((num_of_patch_row, num_of_patch_col))
-        for i in range(self.num_of_func):
-            qp_tmp = np.reshape(qp[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+        if not kltpicker.no_gpu:
+            qp = cp.asarray(qp)
+            noise_mc = cp.asarray(self.noise_mc)
+            log_test_mat = cp.zeros((num_of_patch_row, num_of_patch_col))
+            D = cp.asarray(D)
+            for i in range(self.num_of_func):
+                qp_tmp = cp.reshape(qp[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+                
+                qp_tmp = cp.flip(cp.flip(qp_tmp, 0), 1)
+                
+                scoreTmp = fftconvolve2d_cp(noise_mc, qp_tmp)
+                log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
             
-            qp_tmp = np.flip(np.flip(qp_tmp, 0), 1)
-            
-            scoreTmp = signal.fftconvolve(self.noise_mc, qp_tmp,'valid')
-            log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
+            log_test_mat = cp.asnumpy(log_test_mat)
+        else:
+            log_test_mat = np.zeros((num_of_patch_row, num_of_patch_col))
+            for i in range(self.num_of_func):
+                qp_tmp = np.reshape(qp[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()
+                
+                qp_tmp = np.flip(np.flip(qp_tmp, 0), 1)
+                
+                scoreTmp = signal.fftconvolve(noise_mc, qp_tmp, 'valid')
+                log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
         
         log_test_mat = log_test_mat.transpose() - mu
         neigh = np.ones((kltpicker.patch_size_func, kltpicker.patch_size_func))

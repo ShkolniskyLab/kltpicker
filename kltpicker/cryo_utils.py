@@ -98,7 +98,7 @@ def fast_cfft2(x, axes=(-1, -2)):
         raise ValueError("x must be 2D or 3D")
 
 
-def fast_cfft2_gpu(x, axes=(-1, -2)):
+def fast_cfft2_cp(x, axes=(-1, -2)):
     if len(x.shape) == 2:
         return cp.fft.fftshift(cp.transpose(cp.fft.fft2(cp.transpose(cp.fft.ifftshift(x)))))
     elif len(x.shape) == 3:
@@ -123,7 +123,7 @@ def fast_icfft2(x, axes=(-1, -2)):
     else:
         raise ValueError("x must be 2D or 3D")
 
-def fast_icfft2_gpu(x, axes=(-1, -2)):
+def fast_icfft2_cp(x, axes=(-1, -2)):
     if len(x.shape) == 2:
         return cp.fft.fftshift(cp.transpose(cp.fft.ifft2(cp.transpose(cp.fft.ifftshift(x)))))
 
@@ -188,12 +188,12 @@ def cryo_epsds(imstack, samples_idx, max_d):
     p2[neg_idx] = 0
     return p2, r, r2, x
 
-def cryo_epsds_gpu(imstack, samples_idx, max_d):
+def cryo_epsds_cp(imstack, samples_idx, max_d):
     p = imstack.shape[0]
     if max_d >= p:
         max_d = p - 1
 
-    r, x, _ = cryo_epsdr_gpu(imstack, samples_idx, max_d)
+    r, x, _ = cryo_epsdr_cp(imstack, samples_idx, max_d)
 
     r2 = cp.zeros((2 * p - 1, 2 * p - 1))
     dsquare = cp.square(x)
@@ -201,11 +201,11 @@ def cryo_epsds_gpu(imstack, samples_idx, max_d):
         for j in range(-max_d, max_d + 1):
             d = i ** 2 + j ** 2
             if d <= max_d ** 2:
-                idx, _ = bsearch_gpu(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
+                idx, _ = bsearch_cp(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
                 r2[i + p - 1, j + p - 1] = r[idx - 1]
 
-    w = gwindow_gpu(p, max_d)
-    p2 = fast_cfft2_gpu(r2 * w)
+    w = gwindow_cp(p, max_d)
+    p2 = fast_cfft2_cp(r2 * w)
 
     p2 = p2.real
 
@@ -287,7 +287,7 @@ def cryo_epsdr(vol, samples_idx, max_d):
     x[idx] = 0
     return r, x, cnt
 
-def cryo_epsdr_gpu(vol, samples_idx, max_d):
+def cryo_epsdr_cp(vol, samples_idx, max_d):
     p = vol.shape[0]
     k = vol.shape[2]
     i, j = cp.meshgrid(cp.arange(max_d + 1), cp.arange(max_d + 1))
@@ -303,7 +303,7 @@ def cryo_epsdr_gpu(vol, samples_idx, max_d):
         for j in range(max_d + 1):
             d = i ** 2 + j ** 2
             if d <= max_d ** 2:
-                idx, _ = bsearch_gpu(dsquare, d - 1e-13, d + 1e-13)
+                idx, _ = bsearch_cp(dsquare, d - 1e-13, d + 1e-13)
                 dist_map[i, j] = idx
 
     dist_map = dist_map.astype('int') - 1
@@ -358,11 +358,12 @@ def gwindow(p, max_d):
     w = np.exp(-alpha * (np.square(x) + np.square(y)) / (2 * max_d ** 2))
     return w
 
-def gwindow_gpu(p, max_d):
+def gwindow_cp(p, max_d):
     x, y = cp.meshgrid(cp.arange(-(p - 1), p), cp.arange(-(p - 1), p))
     alpha = 3.0
     w = cp.exp(-alpha * (cp.square(x) + cp.square(y)) / (2 * max_d ** 2))
     return w
+
 
 @jit(nopython=True)
 def bsearch(x, lower_bound, upper_bound):
@@ -404,7 +405,7 @@ def bsearch(x, lower_bound, upper_bound):
 
     return lower_idx, upper_idx
 
-def bsearch_gpu(x, lower_bound, upper_bound):
+def bsearch_cp(x, lower_bound, upper_bound):
     if lower_bound > x[-1] or upper_bound < x[0] or upper_bound < lower_bound:
         return None, None
     lower_idx_a = 1
@@ -442,6 +443,7 @@ def bsearch_gpu(x, lower_bound, upper_bound):
         return None, None
 
     return lower_idx, upper_idx
+
 
 def cryo_prewhiten(proj, noise_response, rel_threshold=None):
     """

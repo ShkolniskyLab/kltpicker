@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--num_of_noise_images', help='Number of noise images to pick per micrograph.',
                         default=0, type=int)
     parser.add_argument('--max_iter', help='Maximum number of iterations.', default=6 * (10 ** 4), type=int)
-    parser.add_argument('--gpu_use', action='store_true', default=False)
+    parser.add_argument('--no_gpu', action='store_true', default=False)
     parser.add_argument('--max_order', help='Maximum order of eigenfunction.', default=100, type=int)
     parser.add_argument('--percent_eigen_func', help='', default=0.99, type=float)
     parser.add_argument('--max_functions', help='', default=400, type=int)

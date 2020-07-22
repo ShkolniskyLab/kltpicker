@@ -224,3 +224,19 @@ def trig_interpolation_gpu(x, y, xq):
     return p
 
 
+def fftconvolve2d_cp(x, y):
+    xn, xm = x.shape
+    yn, ym = y.shape
+    zn = xn + yn -1
+    zm = xm + ym -1
+    z = cp.fft.ifft2(cp.fft.fft2(x, s=(zn, zm)) * cp.fft.fft2(y, s=(zn, zm))).real
+    valid_n = xn - yn + 1
+    valid_m = xm - ym + 1
+    start_n = (zn - valid_n) // 2
+    start_m = (zm - valid_m) // 2
+    end_n = start_n + valid_n
+    end_m = start_m + valid_m
+    z = z[start_n:end_n, start_m:end_m]
+    return z
+
+
