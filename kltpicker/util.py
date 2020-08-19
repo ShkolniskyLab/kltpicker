@@ -5,7 +5,6 @@ from scipy.ndimage import uniform_filter
 from scipy.fftpack import fftshift
 from numba import jit
 
-
 def fftcorrelate(image, filt):
     filt = np.rot90(filt, 2)
     pad_shift = 1 - np.mod(np.array(filt.shape), 2)
@@ -17,7 +16,6 @@ def fftcorrelate(image, filt):
         padded_image = padded_image[pad_shift[0] - 1: -1, pad_shift[1] - 1: -1]
     result = signal.fftconvolve(padded_image, filt, 'valid')
     return result
-
 
 def f_trans_2(b):
     """
@@ -60,122 +58,28 @@ def f_trans_2(b):
     h = np.rot90(h, k=2)
     return h
 
-@jit(nopython=True)
-def radial_avg(z, m):
+def radial_avg(z, m, bins):
     """
     Radially average 2-D square matrix z into m bins.
 
     Computes the average along the radius of a unit circle
-    inscribed in the square matrix z. The average is computed in m bins. The radial average is not computed beyond
-    the unit circle, in the corners of the matrix z. The radial average is returned in zr and the mid-points of the
-    m bins are returned in vector R.
+    inscribed in the square matrix z. The average is computed in m bins. 
+    The radial average is not computed beyond the unit circle, in the corners
+    of the matrix z. The radial average is returned in zr.
     :param z: 2-D square matrix.
     :param m: Number of bins.
+    :param bins: the bins.
     :return zr: Radial average of z.
     :return R: Mid-points of the bins.
     """
-    N = z.shape[1]
-    X = np.array([[x*2/(N-1) -1 for x in range(N)] for x in range(N)])
-    Y = X.transpose()
-    r = (X ** 2 + Y ** 2) ** 0.5
-    dr = 1 / (m - 1)
-    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1)
-    R = (rbins[0:-1] + rbins[1:]) / 2
     zr = np.zeros(m)
-    for j in range(m - 1):
-        bins = np.where(np.logical_and(r >= rbins[j], r < rbins[j + 1]))
-        n = len(np.nonzero(np.logical_and(r >= rbins[j], r < rbins[j + 1]))[0])
+    for j in range(m):
+        n = bins[j][0].size
         if n:
-            for (row, col) in zip(bins[0], bins[1]):
-                zr[j] += z[row, col] / n
+            zr[j] += np.sum(z[bins[j]])/n
         else:
             zr[j] = np.nan
-    bins = np.where(np.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1))[0])
-    if n != 0:
-        for (row, col) in zip(bins[0], bins[1]):
-            zr[m - 1] += z[row, col] / n
-    else:
-        zr[m - 1] = np.nan
-    return zr, R
-
-
-def radial_avg_old(z, m):
-    """
-    Radially average 2-D square matrix z into m bins.
-
-    Computes the average along the radius of a unit circle
-    inscribed in the square matrix z. The average is computed in m bins. The radial average is not computed beyond
-    the unit circle, in the corners of the matrix z. The radial average is returned in zr and the mid-points of the
-    m bins are returned in vector R.
-    :param z: 2-D square matrix.
-    :param m: Number of bins.
-    :return zr: Radial average of z.
-    :return R: Mid-points of the bins.
-    """
-    N = z.shape[1]
-    X = np.array([[x*2/(N-1) -1 for x in range(N)] for x in range(N)])
-    Y = X.transpose()
-    r = (X ** 2 + Y ** 2) ** 0.5
-    dr = 1 / (m - 1)
-    rbins = np.linspace(-dr / 2, 1 + dr / 2, m + 1)
-    R = (rbins[0:-1] + rbins[1:]) / 2
-    zr = np.zeros(m)
-    for j in range(m - 1):
-        bins = np.where(np.logical_and(r >= rbins[j], r < rbins[j + 1]))
-        n = len(np.nonzero(np.logical_and(r >= rbins[j], r < rbins[j + 1]))[0])
-        if n:
-            zr[j] = np.sum(z[bins]) / n
-        else:
-            zr[j] = np.nan
-    bins = np.where(np.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(np.nonzero(np.logical_and(r >= rbins[m - 1], r <= 1))[0])
-    if n != 0:
-        zr[m - 1] = np.sum(z[bins]) / n
-    else:
-        zr[m - 1] = np.nan
-    return zr, R
-
-
-
-
-def radial_avg_gpu(z, m):
-    """
-    Radially average 2-D square matrix z into m bins.
-
-    Computes the average along the radius of a unit circle
-    inscribed in the square matrix z. The average is computed in m bins. The radial average is not computed beyond
-    the unit circle, in the corners of the matrix z. The radial average is returned in zr and the mid-points of the
-    m bins are returned in vector R.
-    :param z: 2-D square matrix.
-    :param m: Number of bins.
-    :return zr: Radial average of z.
-    :return R: Mid-points of the bins.
-    """
-    N = z.shape[1]
-    Y = cp.repeat(cp.arange(N) * 2 / (N - 1) - 1, N).reshape((N, N))
-    X = Y.transpose()
-    r = cp.sqrt(cp.square(X) + cp.square(Y))
-    dr = 1 / (m - 1)
-    rbins = cp.linspace(-dr / 2, 1 + dr / 2, m + 1) # endpoint=True)
-    R = (rbins[0:-1] + rbins[1:]) / 2
-    zr = cp.zeros(m)
-    for j in range(m - 1):
-        bins = cp.where(cp.logical_and(r >= rbins[j], r < rbins[j + 1]))
-        n = len(cp.nonzero(cp.logical_and(r >= rbins[j], r < rbins[j + 1]))[0])
-        if n:
-            zr[j] = cp.sum(z[bins]) / n
-        else:
-            zr[j] = cp.nan
-    bins = cp.where(cp.logical_and(r >= rbins[m - 1], r <= 1))
-    n = len(cp.nonzero(cp.logical_and(r >= rbins[m - 1], r <= 1))[0])
-    if n != 0:
-        zr[m - 1] = cp.sum(z[bins]) / n
-    else:
-        zr[m - 1] = cp.nan
-    return zr, R
-
-
+    return zr
 
 def stdfilter(a, nhood):
     """Local standard deviation of image."""
@@ -183,7 +87,25 @@ def stdfilter(a, nhood):
     c2 = uniform_filter(a * a, nhood, mode='reflect')
     return np.sqrt(c2 - c1 * c1) * np.sqrt(nhood ** 2. / (nhood ** 2 - 1))
 
+def trig_interpolation_mat(x, xq):
+    n = x.size
+    scale = n * (x[1] - x[0]) / 2
+    xs = (x / scale) * np.pi / 2
+    xi = (xq / scale) * np.pi / 2
+    mat = np.zeros((xq.size, x.size))
+    if n % 2:
+        for k in range(n):
+            a = np.sin(n * (xi - xs[k])) / (n * np.sin(xi - xs[k]))
+            a[(xi - xs[k]) == 0] = 1
+            mat[:, k] = a
+    else:
+        for k in range(n):
+            a = np.sin(n * (xi - xs[k])) / (n * np.tan(xi - xs[k]))
+            a[(xi - xs[k]) == 0] = 1
+            mat[:, k] = a
+    return mat
 
+@jit(nopython=True)
 def trig_interpolation(x, y, xq):
     n = x.size
     h = 2 / n
@@ -203,28 +125,8 @@ def trig_interpolation(x, y, xq):
             p = p + y[k] * a
     return p
 
-
-def trig_interpolation_gpu(x, y, xq):
-    n = x.size
-    h = 2 / n
-    scale = (x[1] - x[0]) / h
-    xs = (x / scale) * cp.pi / 2
-    xi = (xq / scale) * cp.pi / 2
-    p = cp.zeros(xi.size)
-    if n % 2:
-        for k in range(n):
-            a = cp.sin(n * (xi - xs[k])) / (n * cp.sin(xi - xs[k]))
-            a[(xi - xs[k]) == 0] = 1
-            p = p + y[k] * a
-    else:
-        for k in range(n):
-            a = cp.sin(n * (xi - xs[k])) / (n * cp.tan(xi - xs[k]))
-            a[(xi - xs[k]) == 0] = 1
-            p = p + y[k] * a
-    return p
-
-
 def fftconvolve2d_cp(x, y):
+    "Convolution in valid mode, by multiplication in frequency space."
     xn, xm = x.shape
     yn, ym = y.shape
     zn = xn + yn -1
@@ -238,5 +140,3 @@ def fftconvolve2d_cp(x, y):
     end_m = start_m + valid_m
     z = z[start_n:end_n, start_m:end_m]
     return z
-
-

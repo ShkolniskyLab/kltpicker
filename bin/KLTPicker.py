@@ -11,7 +11,8 @@ from kltpicker.kltpicker_input import get_args
 from tqdm import tqdm
 import mrcfile
 from kltpicker.micrograph import Micrograph
-from kltpicker.cryo_utils import downsample
+from kltpicker.cryo_utils import downsample_cp
+import cupy as cp
 
 warnings.filterwarnings("ignore")
 
@@ -61,7 +62,7 @@ def get_micrograph(mrc_file, mgscale):
     mrc.close()
     mrc_size = mrc_data.shape
     mrc_data = np.rot90(mrc_data)
-    mrc_data = downsample(mrc_data[np.newaxis, :, :], int(np.floor(mgscale * mrc_size[0])))[0]
+    mrc_data = downsample_cp(cp.asarray(mrc_data), int(np.floor(mgscale * mrc_size[0])))
     if np.mod(mrc_data.shape[0], 2) == 0:  # Odd size is needed.
         mrc_data = mrc_data[0:-1, :]
     if np.mod(mrc_data.shape[1], 2) == 0:  # Odd size is needed.
