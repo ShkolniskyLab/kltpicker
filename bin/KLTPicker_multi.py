@@ -94,7 +94,7 @@ def calc_cpus_per_gpu(mem_usage):
     for each available gpu:
     find available memory and by that choose the number of processes to use this gpu
     """
-    num_gpus = 2 #cp.cuda.runtime.getDeviceCount()
+    num_gpus = 4 #cp.cuda.runtime.getDeviceCount()
     num_available_cpus = mp.cpu_count()    
     cpus_per_gpu = []
     for gpu_index in range(num_gpus):
@@ -110,9 +110,8 @@ def multi_process_micrograph(param):
     gpu_index = param[2]
     with cp.cuda.Device(gpu_index):
         micrograph = get_micrograph(mrc_file, picker.mgscale)
-        print("hi")
         process_micrograph(micrograph, picker)
-        print("done")
+        print(datetime.now())
  
 def multi_process_micrograph_wrap(gpu_index, num_cpus, batch):  
         for b in batch:
@@ -122,7 +121,7 @@ def multi_process_micrograph_wrap(gpu_index, num_cpus, batch):
         
 def get_mrc_batches(params, cpus_per_gpu):
     cpus_per_gpu = np.array(cpus_per_gpu)
-    cpus_per_gpu /= np.sum(cpus_per_gpu)
+    cpus_per_gpu = cpus_per_gpu / np.sum(cpus_per_gpu)
     batch_sizes = np.ceil(len(params) * cpus_per_gpu / np.sum(cpus_per_gpu))
     indices = np.zeros(len(batch_sizes) + 1).astype(int)
     indices[1:] = np.cumsum(batch_sizes).astype("int")
@@ -150,7 +149,7 @@ def main():
     cpus_per_gpu = calc_cpus_per_gpu(mem_usage)
     batches = get_mrc_batches(params, cpus_per_gpu)
     start = datetime.now()
-       
+    print(start)  
     for i in range(len(cpus_per_gpu)):
         if cpus_per_gpu[i]:
             print("Starting on gpu %d with %d cpus."%(i, cpus_per_gpu[i]))
