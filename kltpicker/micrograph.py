@@ -2,7 +2,7 @@ import numpy as np
 import cupy as cp
 from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, fftconvolve2d_cp, trig_interpolation_mat
 from scipy import signal
-from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, picking_from_scoring_mat, als_find_min
+from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, cryo_prewhiten_cp, picking_from_scoring_mat, als_find_min
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -85,8 +85,8 @@ class Micrograph:
         micrograph = fftcorrelate(self.micrograph, bandpass2d)
         self.noise_mc = micrograph
    
-    def estimate_rpsd(self, patch_size, max_iter):
-        """Approximate clean and noise RPSD per micrograph, using CUDA."""
+    def estimate_rpsd(self, patch_size, max_iter, no_gpu):
+        """Approximate clean and noise RPSD per micrograph."""
         micro_size = self.noise_mc.shape[0]
         m = np.floor(micro_size / patch_size)
         M = (m ** 2).astype(int)
@@ -94,12 +94,10 @@ class Micrograph:
         s = np.zeros((M, L))
         num_quads = 2 ** 7
         quad, nodes = lgwt(num_quads, -np.pi, np.pi)
-        nodes = cp.asarray(nodes)
         x = np.tile(quad, (num_quads, 1))
         rho_mat = (x ** 2 + x.transpose() ** 2) ** 0.5
         rho_mat = np.where(rho_mat > np.pi, 0, rho_mat)
         rho_samp, idx = np.unique(rho_mat, return_inverse=True)
-        idx = cp.asarray(idx)
         
         # make bins for radial average
         N = 2 * L - 1
@@ -114,22 +112,41 @@ class Micrograph:
             bins.append(np.where(np.logical_and(r >= rbins[j], r < rbins[j + 1])))
         bins.append(np.where(np.logical_and(r >= rbins[L - 1], r <= 1)))
         
-        trig_interp_mat = cp.asarray(trig_interpolation_mat(R * np.pi, rho_samp))
+        trig_interp_mat = trig_interpolation_mat(R * np.pi, rho_samp) ####
         samples_idx = np.where(np.zeros((int(patch_size), int(patch_size))) == 0)
-        for k in range(M):
-            row = np.ceil((k + 1) / m).astype(int)
-            col = (k + 1 - (row - 1) * m).astype(int)
-            noisemc_block = self.noise_mc[(row - 1) * L:row * L, (col - 1) * L: col * L]
-            noisemc_block = noisemc_block - np.mean(noisemc_block)
-            psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)))
-            r_block = radial_avg(psd_block, L, bins)
-            block_var = np.var(noisemc_block, ddof=1)
-            psd_rad = cp.abs(cp.dot(trig_interp_mat, cp.asarray(r_block)))
-            psd_mat = cp.reshape(psd_rad[idx], [num_quads, num_quads])
-            var_psd = cp.asnumpy((1 / (2 * np.pi) ** 2) * cp.dot(nodes, cp.dot(psd_mat, nodes.transpose())))
-            scaling_psd = block_var / var_psd
-            r_block = scaling_psd * r_block
-            s[k, :] = r_block
+        if no_gpu:
+            for k in range(M):
+                row = np.ceil((k + 1) / m).astype(int)
+                col = (k + 1 - (row - 1) * m).astype(int)
+                noisemc_block = self.noise_mc[(row - 1) * L:row * L, (col - 1) * L: col * L]
+                noisemc_block = noisemc_block - np.mean(noisemc_block)
+                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)), no_gpu)
+                r_block = radial_avg(psd_block, L, bins)
+                block_var = np.var(noisemc_block, ddof=1)
+                psd_rad = np.abs(np.dot(trig_interp_mat, r_block))
+                psd_mat = np.reshape(psd_rad[idx], [num_quads, num_quads])
+                var_psd = (1 / (2 * np.pi) ** 2) * np.dot(nodes, np.dot(psd_mat, nodes.transpose()))
+                scaling_psd = block_var / var_psd
+                r_block = scaling_psd * r_block
+                s[k, :] = r_block        
+        else:
+            trig_interp_mat = cp.asarray(trig_interp_mat)
+            idx = cp.asarray(idx)
+            nodes = cp.asarray(nodes)
+            for k in range(M):
+                row = np.ceil((k + 1) / m).astype(int)
+                col = (k + 1 - (row - 1) * m).astype(int)
+                noisemc_block = self.noise_mc[(row - 1) * L:row * L, (col - 1) * L: col * L]
+                noisemc_block = noisemc_block - np.mean(noisemc_block)
+                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)), no_gpu)
+                r_block = radial_avg(psd_block, L, bins)
+                block_var = np.var(noisemc_block, ddof=1)
+                psd_rad = cp.abs(cp.dot(trig_interp_mat, cp.asarray(r_block)))
+                psd_mat = cp.reshape(psd_rad[idx], [num_quads, num_quads])
+                var_psd = cp.asnumpy((1 / (2 * np.pi) ** 2) * cp.dot(nodes, cp.dot(psd_mat, nodes.transpose())))
+                scaling_psd = block_var / var_psd
+                r_block = scaling_psd * r_block
+                s[k, :] = r_block
         
         # find min arg using ALS:
         approx_clean_psd, approx_noise_psd, alpha, stop_par = als_find_min(s, EPS, max_iter)
@@ -169,7 +186,7 @@ class Micrograph:
         self.r = R
         self.stop_par = stop_par
 
-    def prewhiten_micrograph(self):
+    def prewhiten_micrograph(self, no_gpu):
         r = np.floor((self.mc_size[1] - 1) / 2).astype('int')
         c = np.floor((self.micrograph.shape[0] - 1) / 2).astype('int')
         col = np.arange(-c, c + 1) * np.pi / c
@@ -182,7 +199,10 @@ class Micrograph:
         noise_psd_nodes = np.pad(noise_psd_nodes, (0, rad_samp.size - noise_psd_nodes.size), 'constant',
                                  constant_values=noise_psd_nodes[-1])
         noise_psd_mat = np.reshape(noise_psd_nodes[idx], [col.size, row.size])
-        noise_mc_prewhite = cryo_prewhiten(self.noise_mc, noise_psd_mat)
+        if no_gpu:
+            noise_mc_prewhite = cryo_prewhiten(self.noise_mc, noise_psd_mat)
+        else:
+            noise_mc_prewhite = cryo_prewhiten_cp(self.noise_mc, noise_psd_mat)
         noise_mc_prewhite = noise_mc_prewhite - np.mean(noise_mc_prewhite)
         noise_mc_prewhite = noise_mc_prewhite / np.linalg.norm(noise_mc_prewhite, 'fro')
         self.noise_mc = noise_mc_prewhite
@@ -235,7 +255,7 @@ class Micrograph:
                                                                        kltpicker.j_r_rho[order, :, :].transpose()])
             v_correct = (1 / np.sqrt(kltpicker.quad_nys)) * eig_func_tot[order, :, idx_of_eig]
             v_nys = np.dot(h_samp, (kltpicker.quad_nys * v_correct)) / eig_val_tot[i]
-            v_nys = cp.reshape(v_nys[kltpicker.idx_rsamp], kltpicker.idx_rsamp.shape)
+            v_nys = np.reshape(v_nys[kltpicker.idx_rsamp], kltpicker.idx_rsamp.shape)
             if not order:
                 eig_func[count, :] = (1 / np.sqrt(2 * np.pi)) * v_nys
                 eig_val[count, 0] = eig_val_tot[i]
@@ -309,7 +329,7 @@ class Micrograph:
                 
                 qp_tmp = np.flip(np.flip(qp_tmp, 0), 1)
                 
-                scoreTmp = signal.fftconvolve(noise_mc, qp_tmp, 'valid')
+                scoreTmp = signal.fftconvolve(self.noise_mc, qp_tmp, 'valid')
                 log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
                 
             log_test_mat = log_test_mat.transpose() - mu

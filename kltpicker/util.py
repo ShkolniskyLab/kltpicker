@@ -3,7 +3,6 @@ import cupy as cp
 from scipy import signal
 from scipy.ndimage import uniform_filter
 from scipy.fftpack import fftshift
-from numba import jit
 
 def fftcorrelate(image, filt):
     filt = np.rot90(filt, 2)
@@ -105,7 +104,6 @@ def trig_interpolation_mat(x, xq):
             mat[:, k] = a
     return mat
 
-@jit(nopython=True)
 def trig_interpolation(x, y, xq):
     n = x.size
     h = 2 / n

@@ -79,4 +79,16 @@ def get_args():
                     print("Number of particles to pick must be a positive integer.")
         else:
             print("Please choose Y/N.")
-    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick
+    
+    no_gpu = 0
+    while no_gpu == 0:
+        no_gpu_in = input('Use GPU? (Y/N):\n')
+        if no_gpu_in.strip().lower()[0] == 'n':
+            no_gpu = 1
+        elif no_gpu_in.strip().lower()[0] == 'y':
+            no_gpu == 0
+            break
+        else:
+            print("Please choose Y/N.")
+            
+    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu

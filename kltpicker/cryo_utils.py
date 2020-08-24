@@ -69,24 +69,6 @@ def downsample(image, n):
     output = np.fft.ifft2(np.fft.ifftshift(fx)) * (size_out / size_in)
     return output.real
 
-def fast_cfft2(x, axes=(-1, -2)):
-    if len(x.shape) == 2:
-        return np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(x)))))
-    elif len(x.shape) == 3:
-        y = np.fft.ifftshift(x, axes=axes)
-        y = fft2(y, axes=axes)
-        y = np.fft.fftshift(y, axes=axes)
-        return y 
-
-def fast_icfft2(x, axes=(-1, -2)):
-    if len(x.shape) == 2:
-        return np.fft.fftshift(np.transpose(ifft2(np.transpose(np.fft.ifftshift(x)))))
-    elif len(x.shape) == 3:
-        y = np.fft.ifftshift(x, axes=axes)
-        y = ifft2(y, axes=axes)
-        y = np.fft.fftshift(y, axes=axes)
-        return y
-
 def lgwt(n, a, b):
     """
     Get n leggauss points in interval [a, b]
@@ -105,7 +87,7 @@ def lgwt(n, a, b):
     x = np.flipud(x)
     return x, w
 
-def cryo_epsds(image, samples_idx, max_d):
+def cryo_epsds(image, samples_idx, max_d, no_gpu):
     """
     Estimate the 2D isotropic power spectrum of a given image using in each 
     image only the pixels given in samples_idx. Typically, samples_idx will 
@@ -142,16 +124,36 @@ def cryo_epsds(image, samples_idx, max_d):
     if max_d >= p:
         max_d = p - 1
     # Estimate the 1D isotropic autocorrelation function.
-    r, x, _ = cryo_epsdr(image, samples_idx, max_d)
+    if no_gpu:
+        r, x, _ = cryo_epsdr(image, samples_idx, max_d)
     
-    # Use the 1D autocorrelation estimated above to populate an array of the 2D
-    # isotropic autocorrelction.
-    r2 = autocorr_2d(max_d, x, r, p)
+        # Use the 1D autocorrelation estimated above to populate an array of the 2D
+        # isotropic autocorrelation.
+        dsquare = x ** 2
+        r2 = np.zeros((int(2 * p - 1), int(2 * p - 1)), dtype=np.float64)
+        for i in range(-max_d, max_d + 1):
+            for j in range(-max_d, max_d + 1):
+                d = i ** 2 + j ** 2
+                if d <= max_d ** 2:
+                    idx, _ = bsearch(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
+                    r2[i + p - 1, j + p - 1] = r[int(idx) - 1]                
+        # Window the 2D autocorrelation and Fourier transform it to get the power
+        # spectrum. Always use the Gaussian window, as it has positive Fourier
+        # transform.     
+        w = gwindow(p, max_d)
+        
+    else:
+        r, x, _ = cryo_epsdr_cp(image, samples_idx, max_d)
     
-    # Window the 2D autocorrelation and Fourier transform it to get the power
-    # spectrum. Always use the Gaussian window, as it has positive Fourier
-    # transform.     
-    w = gwindow(p, max_d)
+        # Use the 1D autocorrelation estimated above to populate an array of the 2D
+        # isotropic autocorrelction.
+        r2 = autocorr_2d(max_d, x, r, p)
+        
+        # Window the 2D autocorrelation and Fourier transform it to get the power
+        # spectrum. Always use the Gaussian window, as it has positive Fourier
+        # transform.     
+        w = gwindow_gpu(p, max_d)
+    
     p2 = np.fft.fftshift(fft2(np.fft.ifftshift(r2 * w))).real
     
     # Normalize the power spectrum P2. The power spectrum is normalized such
@@ -172,7 +174,7 @@ def cryo_epsds(image, samples_idx, max_d):
     p2 = np.where(p2 < 0, 0, p2)
     return p2
 
-def cryo_epsdr(image, samples_idx, max_d):
+def cryo_epsdr_cp(image, samples_idx, max_d):
     """
     Estimate the 1D isotropic autocorrelation of an image. The samples to use
     are given in samples_idx. The correlation is computed up to a maximal
@@ -308,7 +310,7 @@ def autocorr_2d(max_d, x, r, p):
         for j in range(-max_d, max_d + 1):
             d = i ** 2 + j ** 2
             if d <= max_d ** 2:
-                idx, _ = bsearch(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
+                idx, _ = bsearch_gpu(dsquare, d * (1 - 1e-13), d * (1 + 1e-13))
                 r2[i + p - 1, j + p - 1] = r[int(idx) - 1]        
     return r2
 
@@ -324,12 +326,40 @@ def distmap(max_d, dsquare, dists_shape):
         for j in range(max_d + 1):
             d = i ** 2 + j ** 2
             if d <= max_d ** 2:
-                idx, _ = bsearch(dsquare, d - 1e-13, d + 1e-13)
+                idx, _ = bsearch_gpu(dsquare, d - 1e-13, d + 1e-13)
                 dist_map[i, j] = idx
     dist_map = dist_map.astype(np.int32) - 1
     return dist_map
 
 @jit(nopython=True)
+def gwindow_gpu(p, max_d):
+    """
+    Create 2D Gaussian window for spectral estimation. Return a (2p-1)x(2p-1) 
+    Gaussian window to be used for 2D power spectrum estimation. 
+
+    Parameters
+    ----------
+    p : int
+        Size of the returned mask.
+    max_d : int
+        Width of the Gaussian.
+
+    Returns
+    -------
+    w : numpy.ndarray
+        (2p-1)x(2p-1) array..
+
+    """
+    l = 2 * p - 1
+    y = np.array([[x for x in range(l)] for x in range(l)])
+    x = y - p + 1
+    alpha = float(3)
+    # Reciprocal of the standard deviation of the Gaussian window. 1/alpha is
+    # the width of the Fourier transform of the window.See Harris 78 for more
+    # details. 
+    w = np.exp(-alpha * (x ** 2 + x.transpose() ** 2) / (2 * max_d ** 2))
+    return w
+
 def gwindow(p, max_d):
     """
     Create 2D Gaussian window for spectral estimation. Return a (2p-1)x(2p-1) 
@@ -359,6 +389,75 @@ def gwindow(p, max_d):
     return w
 
 @jit(nopython=True)
+def bsearch_gpu(x, lower_bound, upper_bound):
+    """
+    Binary search in a sorted vector.
+    
+    Binary O(log2(N)) search of the range of indices of all elements of x 
+    between LowerBound and UpperBound. If no elements between LowerBound and
+    Upperbound are found, the returned lower_index and upper_index are empty.
+    The array x is assumed to be sorted from low to high, and is NOT verified
+    for such sorting. 
+    Based on code from 
+    http://stackoverflow.com/questions/20166847/faster-version-of-find-for-sorted-vectors-matlab
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        A vector of sorted values from low to high.
+    lower_bound : float
+        Lower boundary on the values of x in the search.
+    upper_bound : flo
+        Upper boundary on the values of x in the search.
+
+    Returns
+    -------
+    lower_idx: int
+        The smallest index such that LowerBound<=x(index)<=UpperBound.
+    upper_idx: int
+        The largest index such that LowerBound<=x(index)<=UpperBound.
+
+    """
+    if lower_bound > x[-1] or upper_bound < x[0] or upper_bound < lower_bound:
+        return None, None
+    lower_idx_a = 1
+    lower_idx_b = len(x)
+    upper_idx_a = 1
+    upper_idx_b = len(x)
+
+    while lower_idx_a + 1 < lower_idx_b or upper_idx_a + 1 < upper_idx_b:
+        lw = int(np.floor((lower_idx_a + lower_idx_b) / 2))
+        if x[lw - 1] >= lower_bound:
+            lower_idx_b = lw
+        else:
+            lower_idx_a = lw
+            if upper_idx_a < lw < upper_idx_b:
+                upper_idx_a = lw
+
+        up = int(np.ceil((upper_idx_a + upper_idx_b) / 2))
+        if x[up - 1] <= upper_bound:
+            upper_idx_a = up
+        else:
+            upper_idx_b = up
+            if lower_idx_a < up < lower_idx_b:
+                lower_idx_b = up
+
+    if x[lower_idx_a - 1] >= lower_bound:
+        lower_idx = lower_idx_a
+    else:
+        lower_idx = lower_idx_b
+    if x[upper_idx_b - 1] <= upper_bound:
+        upper_idx = upper_idx_b
+    else:
+        upper_idx = upper_idx_a
+
+    if upper_idx < lower_idx:
+        return None, None
+
+    return lower_idx, upper_idx
+
+    return lower_idx, upper_idx
+
 def bsearch(x, lower_bound, upper_bound):
     """
     Binary search in a sorted vector.
@@ -428,77 +527,111 @@ def bsearch(x, lower_bound, upper_bound):
 
     return lower_idx, upper_idx
 
-# def cryo_prewhiten(proj, noise_response, rel_threshold=None):
-#     """
-#     Pre-whiten a stack of projections using the power spectrum of the noise.
+def cryo_epsdr(image, samples_idx, max_d):
+    """
+    Estimate the 1D isotropic autocorrelation of an image. The samples to use
+    are given in samples_idx. The correlation is computed up to a maximal
+    distance of max_d.
 
+    Parameters
+    ----------
+    image : numpy.ndarray
+        square pxp image.
+    samples_idx : tuple
+        pixel indices to use for autocorrelation estimation.
+    max_d : int
+        Correlations are computed up to a maximal distance of max_d pixels.
+        Default p-1.
 
-#     :param proj: stack of images/projections
-#     :param noise_response: 2d image with the power spectrum of the noise. If all
-#                            images are to be whitened with respect to the same power spectrum,
-#                            this is a single image. If each image is to be whitened with respect
-#                            to a different power spectrum, this is a three-dimensional array with
-#                            the same number of 2d slices as the stack of images.
+    Returns
+    -------
+    r : numpy.ndarray
+        1D vector with samples of the isotropic autocorrelation function.
+    x : numpy.ndarray
+        Distaces at which the samples of the autocorrelation function are
+        given. A vector of the same length as R.
+    cnt : numpy.ndarray
+        Number of autocorrelation samples available for each distance.
 
-#     :param rel_threshold: The relative threshold used to determine which frequencies
-#                           to whiten and which to set to zero. If empty (the default)
-#                           all filter values less than 100*eps(class(proj)) are
-#                           zeroed out, while otherwise, all filter values less than
-#                           threshold times the maximum filter value for each filter
-#                           is set to zero.
+    """
+    p = image.shape[0]
+    
+    # Generate all possible squared distances. For a vertical shift i and 
+    # horizontal shift j, dists(i,j) contains the corresponding isotropic 
+    # correlation distance i^2+j^2. dsquare is then the set of all possible 
+    # squared distances, that is, all distances that can be generated by 
+    # integer steps in the horizontal and vertical directions.
+    i = np.array([[x for x in range(max_d + 1)] for x in range(max_d + 1)])
+    dists = i ** 2 + i.transpose() ** 2
+    dsquare = np.sort(np.unique(dists[np.where(dists <= max_d ** 2)]))
+    x = dsquare ** 0.5 # Distances at which the correlations are computed.
+    
+    # Create a distance map whose value at the index (i,j) is the index in the
+    # array dsquare whose value is i^2+j^2. Pairs (i,j) that correspond to
+    # distances that are larger than max_d are indicated by (-1).   
+    dist_map = np.zeros(dists.shape)
+    for i in range(max_d + 1):
+        for j in range(max_d + 1):
+            d = i ** 2 + j ** 2
+            if d <= max_d ** 2:
+                idx, _ = bsearch(dsquare, d - 1e-13, d + 1e-13)
+                dist_map[i, j] = idx
+    dist_map = dist_map.astype(np.int32) - 1    
+    valid_dists = np.where(dist_map != -1)
 
-#     :return: Pre-whitened stack of images.
-#     """
+    # Compute the number of terms in the expression sum_{j}x(j)x(j+d) for each
+    # distance d. As the correlation is two-dimensioanl, we compute for each
+    # sum of the form  R(k1,k2)=sum_{i,j} X_{i,j} X_{i+k1,j+k2}, how many 
+    # summands are in the in it for each (k1,k2). This is done by setting the
+    # participating image samples to 1 and computing autocorrelation again.
+    mask = np.zeros((p, p))
+    mask[samples_idx] = 1
+    tmp = np.zeros((2 * p + 1, 2 * p + 1))
+    tmp[:p, :p] = mask
+    ftmp = fft2(tmp)
+    c = ifft2(ftmp * np.conj(ftmp))
+    c = c[:max_d + 1, :max_d + 1]
+    c = np.round(c.real).astype('int') 
 
-#     delta = np.finfo(proj.dtype).eps
-
-#     L1, L2, num_images = proj.shape
-#     l1 = L1 // 2
-#     l2 = L2 // 2
-#     K1, K2 = noise_response.shape
-#     k1 = int(np.ceil(K1 / 2))
-#     k2 = int(np.ceil(K2 / 2))
-
-#     filter_var = np.sqrt(noise_response)
-#     filter_var /= np.linalg.norm(filter_var)
-
-#     filter_var = (filter_var + np.flipud(filter_var)) / 2
-#     filter_var = (filter_var + np.fliplr(filter_var)) / 2
-
-#     if rel_threshold is None:
-#         nzidx = np.where(filter_var > 100 * delta)
-#     else:
-#         raise NotImplementedError('not implemented for rel_threshold != None')
-
-#     fnz = filter_var[nzidx]
-#     one_over_fnz = 1 / fnz
-
-#     # matrix with 1/fnz in nzidx, 0 elsewhere
-#     one_over_fnz_as_mat = np.zeros((noise_response.shape[0], noise_response.shape[1]))
-#     one_over_fnz_as_mat[nzidx] += one_over_fnz
-#     pp = np.zeros((noise_response.shape[0], noise_response.shape[1]))
-#     p2 = np.zeros((num_images, L1, L2), dtype='complex128')
-#     proj = proj.transpose((2, 0, 1)).copy()
-
-#     row_start_idx = k1 - l1 - 1
-#     row_end_idx = k1 + l1
-#     col_start_idx = k2 - l2 - 1
-#     col_end_idx = k2 + l2
-
-#     if L1 % 2 == 0 and L2 % 2 == 0:
-#         row_end_idx -= 1
-#         col_end_idx -= 1
-
-#     for i in range(num_images):
-#         pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = proj[i]
-#         fp = fast_cfft2(pp)
-#         fp *= one_over_fnz_as_mat
-#         pp2 = fast_icfft2(fp)
-#         p2[i] = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx])
-
-#     # change back to x,y,z convention
-#     proj = p2.real.transpose((1, 2, 0)).copy()
-#     return proj, filter_var, nzidx
+    r = np.zeros(len(dsquare)) # r(i) is the value of the ACF at distance x(i)
+    
+    # Compute non-periodic autocorrelation of masked image with itself (mask
+    # all pixels that are not used to autocorrelation estimation).
+    input_fft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
+    output_fft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
+    input_ifft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
+    output_ifft2 = np.zeros((2 * p + 1, 2 * p + 1), dtype='complex128')
+    flags = ('FFTW_MEASURE', 'FFTW_UNALIGNED')
+    a_fft2 = FFTW(input_fft2, output_fft2, axes=(0, 1), direction='FFTW_FORWARD', flags=flags)
+    a_ifft2 = FFTW(input_ifft2, output_ifft2, axes=(0, 1), direction='FFTW_BACKWARD', flags=flags)
+    sum_c = c
+    
+    input_fft2[samples_idx] = image[samples_idx]
+    a_fft2()
+    np.multiply(output_fft2, np.conj(output_fft2), out=input_ifft2)
+    a_ifft2()
+    sum_s = output_ifft2
+    
+    # Accumulate all autocorrelation values R(k1,k2) such that k1^2+k2^2=const 
+    # (all autocorrelations of a certain distance).
+    # corrs(i) contains the sum of all products of the form x(j)x(j+d), where
+    # d=sqrt(dsquare(i)).
+    # corr_count is the number of pairs x(j)x(j+d) for each d.  
+    corr_count = np.zeros(len(dsquare))
+    corrs = np.zeros(len(dsquare))
+    for curr_dist in zip(valid_dists[0], valid_dists[1]):
+        dmidx = dist_map[curr_dist]
+        corrs[dmidx] += sum_s[curr_dist].real
+        corr_count[dmidx] += sum_c[curr_dist]
+    # Remove zero correlation sums (distances for which we had no samples at 
+    # that distance)
+    idx = np.where(corr_count != 0)[0]
+    r[idx] += corrs[idx] / corr_count[idx]
+    cnt = corr_count[idx]
+    idx = np.where(corr_count == 0)[0]
+    r[idx] = 0
+    x[idx] = 0
+    return r, x, cnt
 
 def cryo_prewhiten(image, noise_response):
     """
