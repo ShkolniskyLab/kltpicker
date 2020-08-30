@@ -1,8 +1,37 @@
 from pathlib import Path
 from sys import exit
+import progressbar
+import time 
+import argparse
+import os
 
+def parse_args(has_cupy):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input_dir', help='Input directory.')
+    parser.add_argument('--output_dir', help='Output directory.')
+    parser.add_argument('-s', '--particle_size', help='Expected size of particles in pixels.', default=300, type=int)
+    parser.add_argument('--num_of_particles',
+                        help='Number of particles to pick per micrograph. If set to -1 will pick all particles.',
+                        default=-1, type=int)
+    parser.add_argument('--num_of_noise_images', help='Number of noise images to pick per micrograph.',
+                        default=0, type=int)
+    parser.add_argument('--max_iter', help='Maximum number of iterations.', default=6 * (10 ** 4), type=int)
+    parser.add_argument('--max_order', help='Maximum order of eigenfunction.', default=100, type=int)
+    parser.add_argument('--percent_eigen_func', help='', default=0.99, type=float)
+    parser.add_argument('--max_functions', help='', default=400, type=int)
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose.', default=False)
+    parser.add_argument('--threshold', help='Threshold for the picking', default=0, type=float)
+    parser.add_argument('--show_figures', action='store_true', help='Show figures', default=False)
+    parser.add_argument('--preprocess', action='store_false', help='Do not run preprocessing.', default=True)
+    if has_cupy:
+        parser.add_argument('--no_gpu', action='store_true', default=False)
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args()
+        args.no_gpu = 1
+    return args
 
-def get_args():
+def get_args(has_cupy):
     while True:
         input_dir = Path(input('Enter full path of micrographs MRC files:\n'))
         num_files = len(list(input_dir.glob("*.mrc")))
@@ -80,15 +109,35 @@ def get_args():
         else:
             print("Please choose Y/N.")
     
-    no_gpu = 0
-    while no_gpu == 0:
-        no_gpu_in = input('Use GPU? (Y/N):\n')
-        if no_gpu_in.strip().lower()[0] == 'n':
-            no_gpu = 1
-        elif no_gpu_in.strip().lower()[0] == 'y':
-            no_gpu == 0
-            break
-        else:
-            print("Please choose Y/N.")
-            
+    if has_cupy:
+        no_gpu = 0
+        while no_gpu == 0:
+            no_gpu_in = input('Use GPU? (Y/N):\n')
+            if no_gpu_in.strip().lower()[0] == 'n':
+                no_gpu = 1
+            elif no_gpu_in.strip().lower()[0] == 'y':
+                no_gpu == 0
+                break
+            else:
+                print("Please choose Y/N.")
+    else:
+        no_gpu = 1
     return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu
+
+def progress_bar(output_dir, num_mrcs):
+    """
+    Progress bar function that reports the progress of the program, by 
+    periodically checking how many output files have been written. Shows both
+    percentage completed and time elapsed.
+    """
+    start_time = time.time()
+    finished = [f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time]
+    num_finished = len(finished)
+    bar = progressbar.ProgressBar(maxval=num_mrcs, widgets=["[", progressbar.Timer(), "] ", progressbar.Bar('#', '|', '|'), ' (', progressbar.Percentage(), ')'])
+    bar.start()
+    while num_finished < num_mrcs:
+        num_finished = len([f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time])
+        bar.update(num_finished)
+        time.sleep(1)
+    bar.finish()
+    print("Finished successfully!")

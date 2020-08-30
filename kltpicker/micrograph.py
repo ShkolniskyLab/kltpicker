@@ -1,8 +1,11 @@
 import numpy as np
-import cupy as cp
 from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, fftconvolve2d_cp, trig_interpolation_mat
 from scipy import signal
 from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, cryo_prewhiten_cp, picking_from_scoring_mat, als_find_min
+try:
+    import cupy as cp
+except:
+    pass
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -86,7 +89,10 @@ class Micrograph:
         self.noise_mc = micrograph
    
     def estimate_rpsd(self, patch_size, max_iter, no_gpu):
-        """Approximate clean and noise RPSD per micrograph."""
+        """
+        Approximate clean and noise radial power spectrum density of 
+        micrograph.
+        """
         micro_size = self.noise_mc.shape[0]
         m = np.floor(micro_size / patch_size)
         M = (m ** 2).astype(int)
@@ -120,7 +126,7 @@ class Micrograph:
                 col = (k + 1 - (row - 1) * m).astype(int)
                 noisemc_block = self.noise_mc[(row - 1) * L:row * L, (col - 1) * L: col * L]
                 noisemc_block = noisemc_block - np.mean(noisemc_block)
-                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)), no_gpu)
+                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)))
                 r_block = radial_avg(psd_block, L, bins)
                 block_var = np.var(noisemc_block, ddof=1)
                 psd_rad = np.abs(np.dot(trig_interp_mat, r_block))
@@ -138,7 +144,7 @@ class Micrograph:
                 col = (k + 1 - (row - 1) * m).astype(int)
                 noisemc_block = self.noise_mc[(row - 1) * L:row * L, (col - 1) * L: col * L]
                 noisemc_block = noisemc_block - np.mean(noisemc_block)
-                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)), no_gpu)
+                psd_block = cryo_epsds(noisemc_block, samples_idx, int(np.floor(0.3 * patch_size)))
                 r_block = radial_avg(psd_block, L, bins)
                 block_var = np.var(noisemc_block, ddof=1)
                 psd_rad = cp.abs(cp.dot(trig_interp_mat, cp.asarray(r_block)))
@@ -187,6 +193,9 @@ class Micrograph:
         self.stop_par = stop_par
 
     def prewhiten_micrograph(self, no_gpu):
+        """
+        Prewhiten the micrograph using the noise radial power spectrum density.
+        """
         r = np.floor((self.mc_size[1] - 1) / 2).astype('int')
         c = np.floor((self.micrograph.shape[0] - 1) / 2).astype('int')
         col = np.arange(-c, c + 1) * np.pi / c

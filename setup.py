@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='kltpicker',
-      version='6',
+      version='1.2',
       description='KLT picker',
       url='http://github.com/dalitco54/kltpicker',
       author='Dalit Cohen',
@@ -11,12 +11,12 @@ setup(name='kltpicker',
       install_requires=[
           'numpy',
           'mrcfile',
-          'argparse',
           'scipy',
           'pyfftw',
-          'tqdm',
-          'cupy'
+          'progressbar',
+          'numba'
       ],
+      extras_require={'gpu':['cupy']},
       python_requires='>=3',
       scripts=['bin/KLTPicker.py'],
       zip_safe=False)

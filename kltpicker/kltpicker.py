@@ -103,6 +103,7 @@ class KLTPicker:
         self.rsamp_length = 0
         self.rad_mat = 0
 
+
     def preprocess(self):
         """Initializes parameters."""
         radmax = np.floor((self.patch_size_func - 1) / 2)
