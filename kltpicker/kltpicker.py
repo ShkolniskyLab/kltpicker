@@ -10,6 +10,9 @@ PERCENT_EIG_FUNC = 0.99
 NUM_QUAD_NYS = 2 ** 7
 NUM_QUAD_KER = 2 ** 7
 MAX_FUN = 400
+MAX_ITER = 6 * (10 ** 4)
+MAX_ORDER = 100
+THRESHOLD = 0
 
 
 class KLTPicker:
@@ -76,7 +79,7 @@ class KLTPicker:
         self.output_particles = self.output_dir / ('PickedParticles_ParticleSize_%d' % args.particle_size)
         self.no_gpu = args.no_gpu
         self.mgscale = 100 / args.particle_size
-        self.max_order = args.max_order
+        self.max_order = MAX_ORDER
         self.quad_ker = 0
         self.quad_nys = 0
         self.rho = 0
@@ -89,19 +92,19 @@ class KLTPicker:
         self.patch_size_pick_box = np.floor(self.mgscale * args.particle_size)
         self.num_of_particles = args.num_of_particles
         self.num_of_noise_images = args.num_of_noise_images
-        self.threshold = args.threshold
-        self.show_figures = 0
-        patch_size = np.floor(0.8 * self.mgscale * args.particle_size)  # need to put the 0.8 somewhere else.
+        self.threshold = THRESHOLD
+        patch_size = np.floor(0.8 * self.mgscale * args.particle_size)
         if np.mod(patch_size, 2) == 0:
             patch_size -= 1
         self.patch_size = patch_size
-        patch_size_function = np.floor(0.4 * self.mgscale * args.particle_size)  # need to put the 0.4 somewhere else.
+        patch_size_function = np.floor(0.4 * self.mgscale * args.particle_size)
         if np.mod(patch_size_function, 2) == 0:
             patch_size_function -= 1
         self.patch_size_func = int(patch_size_function)
-        self.max_iter = args.max_iter
+        self.max_iter = MAX_ITER
         self.rsamp_length = 0
         self.rad_mat = 0
+        self.verbose = args.verbose
 
 
     def preprocess(self):

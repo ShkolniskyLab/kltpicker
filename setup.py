@@ -9,14 +9,14 @@ setup(name='kltpicker',
       packages=find_packages(),
       license='MIT',
       install_requires=[
-          'numpy',
+          'numpy>=1.16',
           'mrcfile',
-          'scipy',
+          'scipy>=1.3',
           'pyfftw',
-          'progressbar',
+          'progressbar2',
           'numba'
       ],
       extras_require={'gpu':['cupy']},
-      python_requires='>=3',
+      python_requires='~=3.6',
       scripts=['bin/KLTPicker.py'],
       zip_safe=False)

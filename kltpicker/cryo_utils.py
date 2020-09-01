@@ -2,13 +2,11 @@ import numpy as np
 from pyfftw.interfaces.numpy_fft import fft2, ifft2
 from pyfftw import FFTW
 from numpy.polynomial.legendre import leggauss
-import operator as op
 from numba import jit
 try:
     import cupy as cp
 except:
     pass
-
 
 def downsample_cp(image, n):
     """ 
@@ -552,70 +550,127 @@ def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
     [col_idx, row_idx] = np.meshgrid(idx_col, idx_row)
     r_del = np.floor(kltpicker.patch_size_pick_box)
     shape = log_test_n.shape
-    scoring_mat = log_test_n
-    if kltpicker.num_of_particles == -1:
-        num_picked_particles = write_output_files(scoring_mat, shape, r_del, np.iinfo(np.int32(10)).max, op.gt,
-                                                  kltpicker.threshold + 1, kltpicker.threshold,
-                                                  kltpicker.patch_size_func,
-                                                  row_idx, col_idx, kltpicker.output_particles, mrc_name,
-                                                  kltpicker.mgscale, mg_big_size, -np.inf,
-                                                  kltpicker.patch_size_pick_box)
-    else:
-        num_picked_particles = write_output_files(scoring_mat, shape, r_del, kltpicker.num_of_particles, op.gt,
-                                                  kltpicker.threshold + 1, kltpicker.threshold,
-                                                  kltpicker.patch_size_func,
-                                                  row_idx, col_idx, kltpicker.output_particles, mrc_name,
-                                                  kltpicker.mgscale, mg_big_size, -np.inf,
-                                                  kltpicker.patch_size_pick_box)
-    if kltpicker.num_of_noise_images != 0:
-        num_picked_noise = write_output_files(scoring_mat, shape, r_del, kltpicker.num_of_noise_images, op.lt,
-                                              kltpicker.threshold - 1, kltpicker.threshold, kltpicker.patch_size_func,
-                                              row_idx, col_idx, kltpicker.output_noise, mrc_name,
-                                              kltpicker.mgscale, mg_big_size, np.inf, kltpicker.patch_size_pick_box)
-    else:
-        num_picked_noise = 0
-    return num_picked_particles, num_picked_noise
-
-def write_output_files(scoring_mat, shape, r_del, max_iter, oper, oper_param, threshold, patch_size_func, row_idx,
-                       col_idx, output_path, mrc_name, mgscale, mg_big_size, replace_param, patch_size_pick_box):
-    num_picked = 0
-    box_path = output_path / 'box'
-    star_path = output_path / 'star'
-    if not output_path.exists():
-        output_path.mkdir()
+    log_max = np.max(log_test_n)
+   
+    # preparing particle output files:
+    box_path = kltpicker.output_particles / 'box'
+    star_path = kltpicker.output_particles / 'star'
+    if not kltpicker.output_particles.exists():
+        kltpicker.output_particles.mkdir()
     if not box_path.exists():
         box_path.mkdir()
     if not star_path.exists():
         star_path.mkdir()
     box_file = open(box_path / mrc_name.replace('.mrc', '.box'), 'w')
     star_file = open(star_path / mrc_name.replace('.mrc', '.star'), 'w')
-    star_file.write('data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n')
-    iter_pick = 0
-    log_max = np.max(scoring_mat)
-    while iter_pick <= max_iter and oper(oper_param, threshold):
-        max_index = np.argmax(scoring_mat.transpose().flatten())
-        oper_param = scoring_mat.transpose().flatten()[max_index]
-        if not oper(oper_param, threshold):
-            break
-        else:
-            [index_col, index_row] = np.unravel_index(max_index, shape)
-            ind_row_patch = (index_row - 1) + patch_size_func
-            ind_col_patch = (index_col - 1) + patch_size_func
-            row_idx_b = row_idx - index_row
-            col_idx_b = col_idx - index_col
-            rsquare = row_idx_b ** 2 + col_idx_b ** 2
-            scoring_mat[rsquare <= (r_del ** 2)] = replace_param
-            box_file.write(
-                '%i\t%i\t%i\t%i\n' % ((1 / mgscale) * (ind_col_patch + 1 - np.floor(patch_size_pick_box / 2)),
-                                      (mg_big_size[0] + 1) - (1 / mgscale) * (
-                                                  ind_row_patch + 1 + np.floor(patch_size_pick_box / 2)),
-                                      (1 / mgscale) * patch_size_pick_box, (1 / mgscale) * patch_size_pick_box))
-            star_file.write('%i\t%i\t%f\n' % (
-            (1 / mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / mgscale) * (ind_row_patch + 1)),
-            oper_param / log_max))
-            iter_pick += 1
-            num_picked += 1
-    star_file.close()
-    box_file.close()
-    return num_picked
+    star_file.write('data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnAutopickFigureOfMerit #3\n')
+
+    # picking particles: 
+    scoring_mat = log_test_n.copy()
+    if kltpicker.num_of_particles == -1:  # pick all particles.
+        num_picked = 0     
+        p_max = kltpicker.threshold + 1
+        while num_picked <= kltpicker.max_iter and p_max > kltpicker.threshold:
+            max_index = np.argmax(scoring_mat.transpose().flatten())
+            p_max = scoring_mat.transpose().flatten()[max_index]
+            if not p_max > kltpicker.threshold:
+                break
+            else:
+                [index_col, index_row] = np.unravel_index(max_index, shape)
+                ind_row_patch = (index_row - 1) + kltpicker.patch_size_func
+                ind_col_patch = (index_col - 1) + kltpicker.patch_size_func
+                row_idx_b = row_idx - index_row
+                col_idx_b = col_idx - index_col
+                rsquare = row_idx_b ** 2 + col_idx_b ** 2
+                scoring_mat[rsquare <= (r_del ** 2)] = -np.inf
+                box_file.write(
+                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
+                star_file.write('%i\t%i\t%f\n' % (
+                (1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1)),
+                p_max / log_max))
+                num_picked += 1
+        star_file.close()
+        box_file.close()
+        num_picked_particles = num_picked
+
+    else:  # pick only the number of particles specified by user.
+        num_picked = 0
+        p_max = kltpicker.threshold + 1
+        while num_picked <= kltpicker.max_iter and num_picked <= kltpicker.num_of_particles-1 and p_max > kltpicker.threshold:
+            max_index = np.argmax(scoring_mat.transpose().flatten())
+            p_max = scoring_mat.transpose().flatten()[max_index]
+            if not p_max > kltpicker.threshold:
+                break
+            else:
+                [index_col, index_row] = np.unravel_index(max_index, shape)
+                ind_row_patch = (index_row - 1) + kltpicker.patch_size_func
+                ind_col_patch = (index_col - 1) + kltpicker.patch_size_func
+                row_idx_b = row_idx - index_row
+                col_idx_b = col_idx - index_col
+                rsquare = row_idx_b ** 2 + col_idx_b ** 2
+                scoring_mat[rsquare <= (r_del ** 2)] = -np.inf
+                box_file.write(
+                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
+                star_file.write('%i\t%i\t%f\n' % (
+                (1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1)),
+                p_max / log_max))
+                num_picked += 1
+        star_file.close()
+        box_file.close()
+        num_picked_particles = num_picked
+    
+    # pick noise:    
+    if kltpicker.num_of_noise_images != 0:
+        scoring_mat = log_test_n.copy()
+        p_min = kltpicker.threshold - 1
+
+        # preparing noise output files:
+        box_path = kltpicker.output_noise / 'box'
+        star_path = kltpicker.output_noise / 'star'
+        if not kltpicker.output_noise.exists():
+            kltpicker.output_noise.mkdir()
+        if not box_path.exists():
+            box_path.mkdir()
+        if not star_path.exists():
+            star_path.mkdir()
+        box_file = open(box_path / mrc_name.replace('.mrc', '.box'), 'w')
+        star_file = open(star_path / mrc_name.replace('.mrc', '.star'), 'w')
+        star_file.write('data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n')
+        
+        num_picked = 0
+        while num_picked <= kltpicker.num_of_noise_images-1 and p_min < kltpicker.threshold:
+            min_index = np.argmin(scoring_mat.transpose().flatten())
+            p_min = scoring_mat.transpose().flatten()[min_index]
+            if not p_min < kltpicker.threshold:
+                break
+            else:
+                [index_col, index_row] = np.unravel_index(min_index, shape)
+                ind_row_patch = (index_row - 1) + kltpicker.patch_size_func
+                ind_col_patch = (index_col - 1) + kltpicker.patch_size_func
+                row_idx_b = row_idx - index_row
+                col_idx_b = col_idx - index_col
+                rsquare = row_idx_b ** 2 + col_idx_b ** 2
+                scoring_mat[rsquare <= (r_del ** 2)] = np.inf
+                box_file.write(
+                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
+                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
+                star_file.write('%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1))))
+                num_picked += 1
+        star_file.close()
+        box_file.close()
+        num_picked_noise = num_picked
+           
+    else:
+        num_picked_noise = 0
+            
+    return num_picked_particles, num_picked_noise
+
 

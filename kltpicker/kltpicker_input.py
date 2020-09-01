@@ -15,14 +15,7 @@ def parse_args(has_cupy):
                         default=-1, type=int)
     parser.add_argument('--num_of_noise_images', help='Number of noise images to pick per micrograph.',
                         default=0, type=int)
-    parser.add_argument('--max_iter', help='Maximum number of iterations.', default=6 * (10 ** 4), type=int)
-    parser.add_argument('--max_order', help='Maximum order of eigenfunction.', default=100, type=int)
-    parser.add_argument('--percent_eigen_func', help='', default=0.99, type=float)
-    parser.add_argument('--max_functions', help='', default=400, type=int)
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose.', default=False)
-    parser.add_argument('--threshold', help='Threshold for the picking', default=0, type=float)
-    parser.add_argument('--show_figures', action='store_true', help='Show figures', default=False)
-    parser.add_argument('--preprocess', action='store_false', help='Do not run preprocessing.', default=True)
     if has_cupy:
         parser.add_argument('--no_gpu', action='store_true', default=False)
         args = parser.parse_args()
@@ -141,3 +134,15 @@ def progress_bar(output_dir, num_mrcs):
         time.sleep(1)
     bar.finish()
     print("Finished successfully!")
+    
+def write_summary(output_dir, summary):
+    print("\nWriting picking summary at the output path.")
+    summary_text = "\n".join(["\t".join([str(cell) for cell in row]) for row in summary])
+    num_files = len(summary)
+    num_particles = sum([row[1] for row in summary])
+    num_noise = sum([row[2] for row in summary])   
+    with (output_dir / "pickingSummary.txt").open("w") as summary_file:
+        summary_file.write("Picking Summary\n")
+        summary_file.write("Picked %d particles and %d noise images out of %d micrographs.\n\n" %(num_particles, num_noise, num_files))
+        summary_file.write("Picking per micrograph:\nMicrographs name #1\nNumber of picked particles #2\nNumber of picked noise images #3\n--------------------------------\n")   
+        summary_file.write(summary_text)
