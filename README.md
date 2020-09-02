@@ -1,4 +1,4 @@
-<h1>KLTpicker</h1>
+<h1>KLTPicker</h1>
 
 KLT Picker: particle picking using data-driven optimal templates.
 
@@ -23,7 +23,7 @@ The package has been tested on Ubuntu 16.04 and Windows 10. It should probably w
 
 <h2>Install KLTPicker</h2>
 <h3>Install KLTPicker via pip:</h3>
-We recommend to install KLTPicker via pip:
+We recommend installing KLTPicker via pip:
 
 
     $ pip install kltpicker
