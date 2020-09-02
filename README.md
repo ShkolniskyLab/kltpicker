@@ -62,4 +62,4 @@ Just use pip with -U option:
     $ pip install -U kltpicker
 
 <h2>Getting started:</h2>
-Please read the user manual for usage instructions
+Please read the user manual for usage instructions.
