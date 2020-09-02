@@ -9,11 +9,11 @@ This is the Python version containing the complete source code of the KLT Picker
 Please cite the following paper when using this package: A. Eldar, B. Landa, and Y. Shkolnisky, "KLT picker: Particle picking using data-driven optimal templates", Journal of Structural Biology, accepted for publication.
 
 <h2>Recommended Environments:</h2>
-* The package has been tested on Ubuntu 16.04 and Windows 10. It should probably work on other versions of Windows and Linux, but has not been tested on them yet. Similarly for macOS.
+The package has been tested on Ubuntu 16.04 and Windows 10. It should probably work on other versions of Windows and Linux, but has not been tested on them yet. Similarly for macOS.
 
 * Python 3.6.0+ is required.
 
-* The package makes use of the pyfftw package, which in turn uses the FFTW library. Before installing KLTPicker make sure you have the FFTW library installed on your system: http://www.fftw.org/fftw3_doc/Installation-on-Unix.html#Installation-on-Unix
+* The package makes use of the pyfftw package, which in turn uses the FFTW library. Before installing KLTPicker make sure you have the FFTW library installed on your system: http://www.fftw.org/fftw3_doc/Installation-and-Customization.html#Installation-and-Customization
 
 * For **optional** GPU support, the package requires:
   * NVIDIA CUDA GPU with the Compute Capability 3.0 or larger
