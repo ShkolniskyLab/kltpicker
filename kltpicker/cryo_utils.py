@@ -426,11 +426,11 @@ def cryo_prewhiten(image, noise_response):
         row_end_idx -= 1
         col_end_idx -= 1
 
-    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = image.copy() #transpose().copy()
+    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = image.copy()
     fp = np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(pp)))))
     fp *= one_over_fnz_as_mat
     pp2 = np.fft.fftshift(np.transpose(ifft2(np.transpose(np.fft.ifftshift(fp)))))
-    p2 = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).copy() #transpose().copy()
+    p2 = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).copy()
     return p2
 
 def cryo_prewhiten_cp(image, noise_response):
