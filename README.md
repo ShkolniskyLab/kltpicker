@@ -1,7 +1,9 @@
 <h1>KLTpicker</h1>
 
 KLT Picker: particle picking using data-driven optimal templates.
+
 Current version: 1.0 
+
 Date: 09/2020
 
 This is the Python version containing the complete source code of the KLT Picker. A MATLAB version is available at http://github.com/amitayeldar/KLTpicker/.
@@ -23,30 +25,39 @@ The package has been tested on Ubuntu 16.04 and Windows 10. It should probably w
 <h3>Install KLTPicker via pip:</h3>
 We recommend to install KLTPicker via pip:
 
+
 $ pip install kltpicker
 
 In order to enable the GPU support (provided that your system satisfies the above requirements):
+
 
 $ pip install kltpicker[gpu]
 
 <h3>Install KLTPicker from source</h3>
 The tarball of the source tree is available via pip download kltpicker. You can install KLTPicker from the tarball:
 
+
 $ pip install kltpicker-x.x.x.tar.gz
+
 
 You can also install the development version of KLTPicker from a cloned Git repository:
 
+
 $ git clone https://github.com/dalitco54/kltpick.git
+
 $ cd kltpicker
+
 $ pip install .
 
 <h2>Uninstall KLTPicker</h2>
 Use pip to uninstall KLTPicker:
 
+
 $ pip uninstall kltpicker
 
 <h2>Upgrade KLTPicker</h2>
 Just use pip with -U option:
+
 
 $ pip install -U kltpicker
 
