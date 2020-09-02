@@ -1,4 +1,4 @@
-<h1>KLTpicker</h1>
+<h1>KLTPicker</h1>
 
 KLT Picker: particle picking using data-driven optimal templates.
 
