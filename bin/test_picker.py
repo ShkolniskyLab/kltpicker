@@ -27,13 +27,13 @@ def process_micrograph(micrograph, picker):
 
 def get_micrograph(mrc_file, mgscale, no_gpu):
     """Reads an mrc file and downsamples it."""
-    mrc = mrcfile.open(mrc_file)
+    mrc = mrcfile.open(mrc_file, permissive=True)
     mrc_data = mrc.data.astype('float64').transpose()
     mrc.close()
     mrc_size = mrc_data.shape
     mrc_data = np.rot90(mrc_data)
     if no_gpu:
-        mrc_data = downsample(mrc_data, int(np.floor(mgscale * mrc_size[0])))
+        mrc_data = downsample(mrc_data, (np.floor(np.multiply(mgscale, mrc_size))).astype(int))
     else:
         mrc_data = downsample_cp(cp.asarray(mrc_data), int(np.floor(mgscale * mrc_size[0])))
     if np.mod(mrc_data.shape[0], 2) == 0:  # Odd size is needed.

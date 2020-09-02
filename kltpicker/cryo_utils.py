@@ -8,38 +8,32 @@ try:
 except:
     pass
 
-def downsample_cp(image, n):
+def downsample_cp(image, size_out):
     """ 
     Use Fourier methods to change the sample interval and/or aspect ratio
     of any dimensions of the input image. Uses CuPy.
     """
-    size_in = cp.square(image.shape[0])
-    size_out = cp.square(n)
-    x = cp.fft.fftshift(cp.fft.fft2(image))
-    out_shape = cp.array([n, n])
-    in_shape = cp.array(x.shape)
-    start_indices = in_shape // 2 - out_shape // 2
-    end_indices = start_indices + out_shape
-    indexer = tuple([slice(i, j) for (i, j) in zip(start_indices, end_indices)])
-    fx = x[indexer]   
-    output = cp.fft.ifft2(cp.fft.ifftshift(fx)) * (size_out / size_in)
+    x = cp.fft.fftshift(cp.fft.fft2(image))   
+    # crop x:
+    nx, ny = x.shape   
+    nsx = int(cp.floor(nx/2) - cp.floor(size_out[1]/2))
+    nsy = int(cp.floor(ny/2) - cp.floor(size_out[0]/2))
+    fx = x[nsx : nsx + size_out[1], nsy : nsy + size_out[0]]
+    output = cp.fft.ifft2(cp.fft.ifftshift(fx)) * (cp.prod(cp.array(size_out)) / cp.prod(cp.array(image.shape)))  
     return cp.asnumpy(output.real)
 
-def downsample(image, n):
+def downsample(image, size_out):
     """ 
     Use Fourier methods to change the sample interval and/or aspect ratio
     of any dimensions of the input image. 
     """
-    size_in = np.square(image.shape[0])
-    size_out = np.square(n)
-    x = np.fft.fftshift(np.fft.fft2(image))
-    out_shape = np.array([n, n])
-    in_shape = np.array(x.shape)
-    start_indices = in_shape // 2 - out_shape // 2
-    end_indices = start_indices + out_shape
-    indexer = tuple([slice(i, j) for (i, j) in zip(start_indices, end_indices)])
-    fx = x[indexer]   
-    output = np.fft.ifft2(np.fft.ifftshift(fx)) * (size_out / size_in)
+    x = np.fft.fftshift(np.fft.fft2(image))   
+    # crop x:
+    nx, ny = x.shape   
+    nsx = int(np.floor(nx/2) - np.floor(size_out[1]/2))
+    nsy = int(np.floor(ny/2) - np.floor(size_out[0]/2))
+    fx = x[nsx : nsx + size_out[1], nsy : nsy + size_out[0]]
+    output = np.fft.ifft2(np.fft.ifftshift(fx)) * (np.prod(size_out) / np.prod(image.shape))  
     return output.real
 
 def lgwt(n, a, b):
@@ -432,11 +426,11 @@ def cryo_prewhiten(image, noise_response):
         row_end_idx -= 1
         col_end_idx -= 1
 
-    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = image.transpose().copy()
+    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = image.copy() #transpose().copy()
     fp = np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(pp)))))
     fp *= one_over_fnz_as_mat
     pp2 = np.fft.fftshift(np.transpose(ifft2(np.transpose(np.fft.ifftshift(fp)))))
-    p2 = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).transpose().copy()
+    p2 = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).copy() #transpose().copy()
     return p2
 
 def cryo_prewhiten_cp(image, noise_response):
@@ -482,11 +476,11 @@ def cryo_prewhiten_cp(image, noise_response):
         row_end_idx -= 1
         col_end_idx -= 1
 
-    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = cp.asarray(image).transpose().copy()
+    pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = cp.asarray(image)
     fp = cp.fft.fftshift(cp.transpose(cp.fft.fft2(cp.transpose(cp.fft.ifftshift(pp)))))
     fp = fp * cp.asarray(one_over_fnz_as_mat)
     pp2 = cp.fft.fftshift(cp.transpose(cp.fft.ifft2(cp.transpose(cp.fft.ifftshift(fp)))))
-    p2 = cp.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).transpose().copy()
+    p2 = cp.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx])
     return cp.asnumpy(p2)
 
 def als_find_min(sreal, eps, max_iter):
@@ -549,7 +543,7 @@ def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
     idx_col = np.arange(log_test_n.shape[1])
     [col_idx, row_idx] = np.meshgrid(idx_col, idx_row)
     r_del = np.floor(kltpicker.patch_size_pick_box)
-    shape = log_test_n.shape
+    shape = (log_test_n.shape[1], log_test_n.shape[0])
     log_max = np.max(log_test_n)
    
     # preparing particle output files:
@@ -584,12 +578,12 @@ def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
                 rsquare = row_idx_b ** 2 + col_idx_b ** 2
                 scoring_mat[rsquare <= (r_del ** 2)] = -np.inf
                 box_file.write(
-                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
-                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
+                    '%i\t%i\t%i\t%i\n' % (np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((mg_big_size[1] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box), np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box)))           
                 star_file.write('%i\t%i\t%f\n' % (
-                (1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1)),
+                np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1)), np.round((mg_big_size[1] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1))),
                 p_max / log_max))
                 num_picked += 1
         star_file.close()
@@ -613,12 +607,12 @@ def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
                 rsquare = row_idx_b ** 2 + col_idx_b ** 2
                 scoring_mat[rsquare <= (r_del ** 2)] = -np.inf
                 box_file.write(
-                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
-                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
+                    '%i\t%i\t%i\t%i\n' % (np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((mg_big_size[1] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box), np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box)))
                 star_file.write('%i\t%i\t%f\n' % (
-                (1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1)),
+                np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1)), np.round((mg_big_size[1] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1))),
                 p_max / log_max))
                 num_picked += 1
         star_file.close()
@@ -658,11 +652,11 @@ def picking_from_scoring_mat(log_test_n, mrc_name, kltpicker, mg_big_size):
                 rsquare = row_idx_b ** 2 + col_idx_b ** 2
                 scoring_mat[rsquare <= (r_del ** 2)] = np.inf
                 box_file.write(
-                    '%i\t%i\t%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (mg_big_size[0] + 1) - (1 / kltpicker.mgscale) * (
-                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2)),
-                                          (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box, (1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box))
-                star_file.write('%i\t%i\n' % ((1 / kltpicker.mgscale) * (ind_col_patch + 1), (mg_big_size[0] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1))))
+                    '%i\t%i\t%i\t%i\n' % (np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1 - np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((mg_big_size[1] + 1) - (1 / kltpicker.mgscale) * (
+                                                      ind_row_patch + 1 + np.floor(kltpicker.patch_size_pick_box / 2))),
+                                          np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box), np.round((1 / kltpicker.mgscale) * kltpicker.patch_size_pick_box)))
+                star_file.write('%i\t%i\n' % (np.round((1 / kltpicker.mgscale) * (ind_col_patch + 1)), np.round((mg_big_size[1] + 1) - ((1 / kltpicker.mgscale) * (ind_row_patch + 1)))))
                 num_picked += 1
         star_file.close()
         box_file.close()
