@@ -2,12 +2,12 @@ from pathlib import Path
 import warnings
 from sys import exit
 import numpy as np
-from kltpicker.kltpicker import KLTPicker
-from kltpicker.util import trig_interpolation
-from kltpicker.kltpicker_input import parse_args, get_args, progress_bar, write_summary
+from .kltpicker import KLTPicker
+from .util import trig_interpolation
+from .kltpicker_input import parse_args, get_args, progress_bar, write_summary
 import mrcfile
-from kltpicker.micrograph import Micrograph
-from kltpicker.cryo_utils import downsample, downsample_cp
+from .micrograph import Micrograph
+from .cryo_utils import downsample, downsample_cp
 import multiprocessing as mp
 import os
 warnings.filterwarnings("ignore")
@@ -183,7 +183,3 @@ def main():
     num_particles = sum([row[1] for row in res])
     num_noise = sum([row[2] for row in res]) 
     print("Picked %d particles and %d noise images out of %d micrographs." %(num_particles, num_noise, num_files))
-    
-if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True)
-    main()

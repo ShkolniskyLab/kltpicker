@@ -1,13 +1,16 @@
 from setuptools import setup, find_packages
 
 setup(name='kltpicker',
-      version='1.2',
+      version='1.3',
       description='KLT picker',
       url='http://github.com/dalitco54/kltpicker',
       author='Dalit Cohen',
       author_email='dalitcohen@mail.tau.ac.il',
       packages=find_packages(),
-      license='MIT',
+      license='GNU General Public License v3.0',
+      entry_points = {
+        "console_scripts": ['KLTPicker = kltpicker.main:main']
+        },
       install_requires=[
           'numpy>=1.16',
           'mrcfile',
