@@ -9,7 +9,7 @@ setup(name='kltpicker',
       packages=find_packages(),
       license='GNU General Public License v3.0',
       entry_points = {
-        "console_scripts": ['KLTPicker = kltpicker.main:main']
+        "console_scripts": ['kltpicker = kltpicker.main:main']
         },
       install_requires=[
           'numpy>=1.16',

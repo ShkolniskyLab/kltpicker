@@ -3,6 +3,7 @@ import numpy as np
 import scipy.special as ssp
 from .cryo_utils import lgwt
 from multiprocessing import Pool, cpu_count
+import time
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -13,7 +14,6 @@ MAX_FUN = 400
 MAX_ITER = 6 * (10 ** 4)
 MAX_ORDER = 100
 THRESHOLD = 0
-
 
 class KLTPicker:
     """
@@ -90,8 +90,8 @@ class KLTPicker:
         self.rsamp_r = 0
         self.r_r = 0
         self.patch_size_pick_box = np.floor(self.mgscale * args.particle_size)
-        self.num_of_particles = args.num_of_particles
-        self.num_of_noise_images = args.num_of_noise_images
+        self.num_of_particles = args.num_particles
+        self.num_of_noise_images = args.num_noise
         self.threshold = THRESHOLD
         patch_size = np.floor(0.8 * self.mgscale * args.particle_size)
         if np.mod(patch_size, 2) == 0:
@@ -105,6 +105,8 @@ class KLTPicker:
         self.rsamp_length = 0
         self.rad_mat = 0
         self.verbose = args.verbose
+        self.num_mrcs = 0
+        self.start_time = time.time()
 
 
     def preprocess(self):

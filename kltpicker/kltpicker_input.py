@@ -4,24 +4,37 @@ import progressbar
 import time 
 import argparse
 import os
+import re
+try:
+    import cupy
+    num_gpus = cupy.cuda.runtime.getDeviceCount()
+except:
+    pass
 
 def parse_args(has_cupy):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', help='Input directory.')
-    parser.add_argument('--output_dir', help='Output directory.')
-    parser.add_argument('-s', '--particle_size', help='Expected size of particles in pixels.', default=300, type=int)
-    parser.add_argument('--num_of_particles',
+    parser.add_argument('-i', '--input-dir', help='Input directory.')
+    parser.add_argument('-o', '--output-dir', help='Output directory.')
+    parser.add_argument('-s', '--particle-size', help='Expected size of particles in pixels.', type=int)
+    parser.add_argument('-p', '--num-particles',
                         help='Number of particles to pick per micrograph. If set to -1 will pick all particles.',
                         default=-1, type=int)
-    parser.add_argument('--num_of_noise_images', help='Number of noise images to pick per micrograph.',
+    parser.add_argument('-n', '--num-noise', help='Number of noise images to pick per micrograph.',
                         default=0, type=int)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose.', default=False)
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose. Choose this to display number of particles and noise images picked from each micrograph during runtime.', default=False)
+    parser.add_argument('--max-processes', help='Maximum number of concurrent processes to run. -1 to let the program decide.', type=int, default=-1)
     if has_cupy:
-        parser.add_argument('--no_gpu', action='store_true', default=False)
+        parser.add_argument('--no-gpu', action='store_true', help="Don't use GPUs.", default=False)
+        parser.add_argument('--gpu-indices', help='Indices of GPUs to be used. Valid indices: 0,...,%d. Enter -1 to use all available GPUS.'%(num_gpus-1), default=[-1], nargs='+', type=int)
         args = parser.parse_args()
+        if args.gpu_indices == [-1]:
+            args.gpu_indices = list(range(num_gpus))
+        else: 
+            args.gpu_indices = [x for x in args.gpu_indices if x in range(num_gpus)]
     else:
         args = parser.parse_args()
         args.no_gpu = 1
+        args.gpu_indices = []
     return args
 
 def get_args(has_cupy):
@@ -102,20 +115,64 @@ def get_args(has_cupy):
         else:
             print("Please choose Y/N.")
     
+    verbose=0
+    while verbose == 0:
+        verbose_in = input('Display detailed progress? (Y/N):\n')
+        if verbose_in.strip().lower()[0] == 'y':
+            verbose = True
+        elif verbose_in.strip().lower()[0] == 'n':
+            verbose = False
+            break
+        else:
+            print("Please choose Y/N.")
+            
+    max_processes = -1
+    while True:
+        max_processes_in = input('Enter maximum number of concurrent processes (-1 to let the program decide):\n')
+        try:
+            max_processes = int(max_processes_in)
+            if max_processes < 1 and max_processes != -1:    
+                print("Maximum number of concurrent processes must be a positive integer (except -1 to let the program decide).")
+            else:
+                break
+        except ValueError:
+            print("Maximum number of concurrent processes must be a positive integer (except -1 to let the program decide).")
+        
     if has_cupy:
         no_gpu = 0
+        gpu_indices = []
         while no_gpu == 0:
             no_gpu_in = input('Use GPU? (Y/N):\n')
             if no_gpu_in.strip().lower()[0] == 'n':
                 no_gpu = 1
             elif no_gpu_in.strip().lower()[0] == 'y':
                 no_gpu == 0
+                while gpu_indices == []:
+                    gpu_indices_in = input('Which GPUs would you like to use?\n(Valid indices: 0,...,%d. Enter -1 to use all):\n'%(num_gpus-1))
+                    if gpu_indices_in.strip() == '-1':
+                        gpu_indices = list(range(num_gpus))
+                        break
+                    else:
+                        gpu_indices_split = re.split(',| ', gpu_indices_in)
+                        for gpu_index in gpu_indices_split:
+                            try:
+                                gpu_index = int(gpu_index)
+                                if gpu_index in range(num_gpus):
+                                    gpu_indices.append(gpu_index)
+                            except ValueError:
+                                pass
+                        gpu_indices = list(set(gpu_indices))
+                        if gpu_indices:
+                            break
+                        else:
+                            print("Please specify valid GPU indices, separated by whitespaces or commas.")
                 break
             else:
                 print("Please choose Y/N.")
+        
     else:
         no_gpu = 1
-    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu
+    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu, gpu_indices, verbose, max_processes
 
 def progress_bar(output_dir, num_mrcs):
     """
@@ -134,6 +191,11 @@ def progress_bar(output_dir, num_mrcs):
         time.sleep(1)
     bar.finish()
     print("Finished successfully!")
+
+def check_num_finished(output_dir, start_time):
+    finished = [f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time]
+    num_finished = len(finished)
+    return num_finished
     
 def write_summary(output_dir, summary):
     print("\nWriting picking summary at the output path.")
