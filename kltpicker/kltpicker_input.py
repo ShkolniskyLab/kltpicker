@@ -13,16 +13,16 @@ except:
 
 def parse_args(has_cupy):
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input-dir', help='Input directory.')
-    parser.add_argument('-o', '--output-dir', help='Output directory.')
+    parser.add_argument('-i', '--input-dir', help='Full path of input directory.')
+    parser.add_argument('-o', '--output-dir', help='Full path of output directory.')
     parser.add_argument('-s', '--particle-size', help='Expected size of particles in pixels.', type=int)
     parser.add_argument('-p', '--num-particles',
                         help='Number of particles to pick per micrograph. If set to -1 will pick all particles.',
                         default=-1, type=int)
     parser.add_argument('-n', '--num-noise', help='Number of noise images to pick per micrograph.',
                         default=0, type=int)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose. Choose this to display number of particles and noise images picked from each micrograph during runtime.', default=False)
-    parser.add_argument('--max-processes', help='Maximum number of concurrent processes to run. -1 to let the program decide.', type=int, default=-1)
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose. Choose this to display number of particles and noise images picked from each micrograph during runtime. Otherwise, you get a simple progress bar.', default=False)
+    parser.add_argument('--max-processes', help='Limit the number of concurrent processes to run. -1 to let the program choose.', type=int, default=-1)
     if has_cupy:
         parser.add_argument('--no-gpu', action='store_true', help="Don't use GPUs.", default=False)
         parser.add_argument('--gpu-indices', help='Indices of GPUs to be used. Valid indices: 0,...,%d. Enter -1 to use all available GPUS.'%(num_gpus-1), default=[-1], nargs='+', type=int)
@@ -50,17 +50,24 @@ def get_args(has_cupy):
             print("Could not find any files in %s." % input_dir)
 
     while True:
-        output_dir = Path(input('Enter full path of output directory:\n'))
+        output_path = input('Enter full path of output directory:\n')
+        output_dir = Path(output_path)
         if output_dir.is_file():
             print("There is already a file with the name you specified. Please specify a directory.")
+        elif not output_path:
+            print("Please specify a directory.")
         elif output_dir.parent.exists() and not output_dir.exists():
-            create_dir = input('Output directory does not exist. Create? (Y/N):')
-            if create_dir.strip().lower()[0] == 'y':
-                Path.mkdir(output_dir)
-                break
-            else:
-                print("OK, exiting...")
-                exit(0)
+            while True:
+                create_dir = input('Output directory does not exist. Create? (Y/N):')
+                if create_dir.strip().lower().startswith('y'):
+                    Path.mkdir(output_dir)
+                    break
+                elif create_dir.strip().lower().startswith('n'):
+                    print("OK, exiting...")
+                    exit(0)
+                else:
+                    print("Please choose Y/N.") 
+            break
         elif not output_dir.parent.exists():
             print('Parent directory %s does not exist. Please specify an existing directory.' % output_dir.parent)
         else:
@@ -80,9 +87,9 @@ def get_args(has_cupy):
     num_particles_to_pick = 0
     while num_particles_to_pick == 0:
         pick_all = input('Pick all particles? (Y/N):\n')
-        if pick_all.strip().lower()[0] == 'y':
+        if pick_all.strip().lower().startswith('y'):
             num_particles_to_pick = -1
-        elif pick_all.strip().lower()[0] == 'n':
+        elif pick_all.strip().lower().startswith('n'):
             while True:
                 num_particles_to_pick = input('How many particles to pick:\n')
                 try:
@@ -99,9 +106,9 @@ def get_args(has_cupy):
     num_noise_to_pick = -1
     while num_noise_to_pick == -1:
         pick_noise = input('Pick noise images? (Y/N):\n')
-        if pick_noise.strip().lower()[0] == 'n':
+        if pick_noise.strip().lower().startswith('n'):
             num_noise_to_pick = 0
-        elif pick_noise.strip().lower()[0] == 'y':
+        elif pick_noise.strip().lower().startswith('y'):
             while True:
                 num_noise_to_pick = input('How many noise images to pick:\n')
                 try:
@@ -118,9 +125,9 @@ def get_args(has_cupy):
     verbose=0
     while verbose == 0:
         verbose_in = input('Display detailed progress? (Y/N):\n')
-        if verbose_in.strip().lower()[0] == 'y':
+        if verbose_in.strip().lower().startswith('y'):
             verbose = True
-        elif verbose_in.strip().lower()[0] == 'n':
+        elif verbose_in.strip().lower().startswith('n'):
             verbose = False
             break
         else:
@@ -143,9 +150,9 @@ def get_args(has_cupy):
         gpu_indices = []
         while no_gpu == 0:
             no_gpu_in = input('Use GPU? (Y/N):\n')
-            if no_gpu_in.strip().lower()[0] == 'n':
+            if no_gpu_in.strip().lower().startswith('n'):
                 no_gpu = 1
-            elif no_gpu_in.strip().lower()[0] == 'y':
+            elif no_gpu_in.strip().lower().startswith('y'):
                 no_gpu == 0
                 while gpu_indices == []:
                     gpu_indices_in = input('Which GPUs would you like to use?\n(Valid indices: 0,...,%d. Enter -1 to use all):\n'%(num_gpus-1))
