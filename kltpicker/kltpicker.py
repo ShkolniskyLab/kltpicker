@@ -75,8 +75,8 @@ class KLTPicker:
         self.particle_size = args.particle_size
         self.input_dir = Path(args.input_dir)
         self.output_dir = Path(args.output_dir)
-        self.output_noise = self.output_dir / ('PickedNoise_ParticleSize_%d' % args.particle_size)
-        self.output_particles = self.output_dir / ('PickedParticles_ParticleSize_%d' % args.particle_size)
+        self.output_noise = self.output_dir / ('pickedNoiseParticleSize%d' % args.particle_size)
+        self.output_particles = self.output_dir / ('pickedParticlesParticleSize%d' % args.particle_size)
         self.no_gpu = args.no_gpu
         self.mgscale = 100 / args.particle_size
         self.max_order = MAX_ORDER

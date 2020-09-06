@@ -1,6 +1,6 @@
 from pathlib import Path
 import warnings
-from sys import exit
+from sys import exit, argv
 import numpy as np
 from .kltpicker import KLTPicker
 from .util import trig_interpolation
@@ -68,34 +68,35 @@ def get_mempool_usage(param, gpu_index):
         mem_usage = (start-finish)*1.2
         return mem_usage
 
-def calc_cpus_per_gpu(mem_usage, max_processes, gpu_indices):
+def calc_procs_per_gpu(mem_usage, max_processes, gpu_indices):
     """
     Find how many available GPUs there are, and for each available GPU compute
     the maximal number of processes that can use it (based on memory usage).
     """
     num_available_cpus = min(mp.cpu_count(), max_processes)
-    cpus_per_gpu = {}
+    procs_per_gpu = {}
     for gpu_index in gpu_indices:
-        if sum(cpus_per_gpu.values()) < num_available_cpus:
+        if sum(procs_per_gpu.values()) < num_available_cpus:
             cp.cuda.runtime.setDevice(gpu_index)	
             free_mem = cp.cuda.runtime.memGetInfo()[0]
-            cpus_per_gpu[gpu_index] = min(np.floor(free_mem/mem_usage), num_available_cpus - sum(cpus_per_gpu.values()))
+            procs_per_gpu[gpu_index] = min(np.floor(free_mem/mem_usage), num_available_cpus - sum(procs_per_gpu.values()))
         else:
-            cpus_per_gpu[gpu_index] = 0
-    return cpus_per_gpu
+            procs_per_gpu[gpu_index] = 0
+    return procs_per_gpu
 
     
 def multi_process_micrograph_gpu(param):
     """
     Process micrographs in parallel, using GPU.
-    """    
+    """
+    # Unpack parameters (pool.map can map only one argument per function call).
     mrc_file = param[0]
     picker = param[1]
     gpu_index = param[2]
     with cp.cuda.Device(gpu_index):
         micrograph = get_micrograph(mrc_file, picker.mgscale, picker.no_gpu)
         summary = process_micrograph(micrograph, picker)
-    if picker.verbose:
+    if picker.verbose: # User requested detailed output.
         num_finished = check_num_finished(picker.output_particles / 'star', picker.start_time)
         print(time.strftime("%H:%M:%S", time.gmtime(time.time() - picker.start_time)) + " - Picked %d particles and %d noise images out of %s. (%3d%s)" %(summary[1], summary[2], summary[0], round(num_finished/picker.num_mrcs*100), "%"))
     return summary
@@ -103,25 +104,28 @@ def multi_process_micrograph_gpu(param):
 def multi_process_micrograph(param):
     """
     Process micrographs in parallel, no GPU.
-    """    
+    """
+    # Unpack parameters (pool.map can map only one argument per function call).
     mrc_file = param[0]
     picker = param[1]
     micrograph = get_micrograph(mrc_file, picker.mgscale, picker.no_gpu)
     summary = process_micrograph(micrograph, picker)
-    if picker.verbose:
+    if picker.verbose: # User requested detailed output.
         num_finished = check_num_finished(picker.output_particles / 'star', picker.start_time)
         print(time.strftime("%H:%M:%S", time.gmtime(time.time() - picker.start_time)) + " - Picked %d particles and %d noise images out of %s. (%3d%s)" %(summary[1], summary[2], summary[0], round(num_finished/picker.num_mrcs*100), "%"))
     return summary
 
  
-def multi_process_micrograph_pool(gpu_index, num_cpus, batch, shared_list):
+def multi_process_micrograph_pool(gpu_index, num_procs, batch, shared_list):
     """
-    A wrapper function that allows processing many mrcs in parallel using
+    A wrapper function that allows processing many micrographs in parallel using
     a worker pool.
+    For each GPU, this function is called in a new process. This process runs
+    a pool of workers of size num_procs, all using the same GPU. 
     """
     for b in batch:
         b.append(gpu_index)
-    with mp.Pool(processes=int(num_cpus)) as pool:
+    with mp.Pool(processes=int(num_procs)) as pool:
         shared_list += [x for x in pool.imap_unordered(multi_process_micrograph_gpu, batch, chunksize=7)]
 
 def get_mrc_batches(params, cpus_per_gpu):
@@ -141,54 +145,96 @@ def get_mrc_batches(params, cpus_per_gpu):
     return batches
        
 def main():
+    # Because of CUDA limitations, it is impossible to fork processes after 
+    # invoking CUDA. So we need to use 'spawn' start method instead.
     mp.set_start_method('spawn', force=True)
-    args = parse_args(HAS_CUPY)
-    if args.output_dir is None or args.input_dir is None or args.particle_size is None:
-        args.input_dir, args.output_dir, args.particle_size, args.num_of_particles, args.num_of_noise_images, args.no_gpu, args.gpu_indices, args.verbose, args.max_processes = get_args(HAS_CUPY)
+    
+    # Get user arguments:
+    user_input = argv
+    if len(user_input) > 1: # User entered arguments. Use command line mode.
+        args = parse_args(HAS_CUPY)
+        # Check if user entered the mandatory arguments: input and output 
+        # directory and particle size. If not, exit.
+        if args.output_dir is None or args.input_dir is None or args.particle_size is None:
+            print("Error: one or more of the following arguments are missing: input-dir, output-dir, particle-size. For help run kltpicker -h")
+            exit()
+
+    else: # User didn't enter arguments, use interactive mode to get arguments.
+        args = parse_args(HAS_CUPY) # Initiate args with default values.
+        args.input_dir, args.output_dir, args.particle_size, args.num_of_particles, args.num_of_noise_images, args.no_gpu, args.gpus, args.verbose, args.max_processes = get_args(HAS_CUPY)
+        
+    # Handle user options:
+    # If max_processes limit not set, set it to infinity.
     if args.max_processes == -1:
         args.max_processes = np.inf
+    
+    # Find number of .mrc files in input directory. If there are none, exit.
     num_files = len(list(Path(args.input_dir).glob("*.mrc")))
     if num_files > 0:
         print("\nRunning on %i files." % len(list(Path(args.input_dir).glob("*.mrc"))))
     else:
         print("Could not find any .mrc files in %s. \nExiting..." % args.input_dir)
         exit(0)
+    
     if not args.no_gpu:
-        print("Using GPUs %s."%(", ".join([str(x) for x in args.gpu_indices])))
-    picker = KLTPicker(args)
+        print("Using GPUs %s."%(", ".join([str(x) for x in args.gpus])))
+    
+    picker = KLTPicker(args) # Initiate picker object.
     picker.num_mrcs = num_files
-    mrc_files = picker.input_dir.glob("*.mrc")   
+    mrc_files = picker.input_dir.glob("*.mrc")
+    
+    # Preprocessing. If using GPU, preprocessing includes the calculation of 
+    # memory that is taken up in the processing of a single micrograph in the
+    # GPU.
     print("Preprocessing (usually takes up to 1 minute)...")
     picker.preprocess()
     params = [[mrc_file, picker] for mrc_file in mrc_files]
-    if not picker.output_dir.exists():
+    if not picker.output_dir.exists(): # If the output directory doesn't exist, create it.
         Path.mkdir(picker.output_dir)
-    if args.no_gpu:
+    
+    if args.no_gpu: # GPU is disabled by user/not available on system.
         print("Preprocess finished. Picking particles...")
-        os.environ["NUMBA_DISABLE_CUDA"] = "1"
-        if not picker.verbose:
+        os.environ["NUMBA_DISABLE_CUDA"] = "1"  # Disable use of CUDA by NUMBA.
+        if not picker.verbose: # Display simple progress bar.
             p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", num_files], name="KLTPicker_ProgressBar")
             p.start() 
+        # Pick particles. The number of concurrent processes is the minimum of
+        # the limit set by the user and two less than the number of CPUs on the machine.
         with mp.Pool(processes=min(args.max_processes, mp.cpu_count() - 2)) as pool:
-            res = [x for x in pool.imap_unordered(multi_process_micrograph, params)]
-    else:
-        mem_usage = get_mempool_usage(params[0], args.gpu_indices[0])    
+            # imap creates an iterator so we don't exhaust the machine's memory
+            # (as opposed to map). imap_unordered is slightly faster than imap.
+            res = [x for x in pool.imap_unordered(multi_process_micrograph, params)]  
+
+    else: # Using GPU.
+        # Calculate the memory usage of the GPU by a single process on one micrograph.
+        mem_usage = get_mempool_usage(params[0], args.gpus[0])    
         print("Preprocess finished. Picking particles...")
-        cpus_per_gpu = calc_cpus_per_gpu(mem_usage, args.max_processes, args.gpu_indices)
-        batches = get_mrc_batches(params, cpus_per_gpu)
-        if not picker.verbose:
+        
+        # Calculate the number of processes to run on each GPU, and partition
+        # the micrographs into batches to be passed to each GPU.
+        procs_per_gpu = calc_procs_per_gpu(mem_usage, args.max_processes, args.gpus)
+        batches = get_mrc_batches(params, procs_per_gpu)
+        if not picker.verbose: # Display simple progress bar.
             p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", num_files], name="KLTPicker_ProgressBar")
-            p.start()  
+            p.start()
+        # We have multiple processes writing results to the same "res" object,
+        # so we need a manager (in the version without GPU the pool function
+        # takes care of this).
         manager = mp.Manager()
         res = manager.list()
+        # Distribute the batches of micrographs to different processes. Each
+        # process runs a pool of workers on its own GPU. The size of each 
+        # worker pool is according to procs_per_gpu.
         jobs = []
-        for i in cpus_per_gpu:
-            if cpus_per_gpu[i]:
-                p = mp.Process(target=multi_process_micrograph_pool, args=[i, int(cpus_per_gpu[i]), batches[i], res], name="KLTPicker%d"%i)
+        for i in procs_per_gpu:
+            if procs_per_gpu[i]:
+                p = mp.Process(target=multi_process_micrograph_pool, args=[i, int(procs_per_gpu[i]), batches[i], res], name="KLTPicker%d"%i)
                 jobs.append(p)
                 p.start()       
         for proc in jobs:
             proc.join()
+    
+    # Write summary file and print summary to user.
     write_summary(picker.output_dir, res)
     num_files = len(res)
     num_particles = sum([row[1] for row in res])
