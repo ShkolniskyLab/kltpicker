@@ -8,7 +8,8 @@ Date: 09/2020
 
 This is the Python version containing the complete source code of the KLT Picker. A MATLAB version is available at http://github.com/amitayeldar/KLTpicker/.
 
-Please cite the following paper when using this package: A. Eldar, B. Landa, and Y. Shkolnisky, "KLT picker: Particle picking using data-driven optimal templates", Journal of Structural Biology, accepted for publication.
+Please cite the following paper when using this package: 
+Eldar A, Landa B, Shkolnisky Y. KLT picker: Particle picking using data-driven optimal templates. J Struct Biol. 2020 May;210(2) 107473.
 
 <h2>Recommended Environments:</h2>
 The package has been tested on Ubuntu 16.04 and Windows 10. It should probably work on other versions of Windows and Linux, but has not been tested on them yet. Similarly for macOS.
@@ -43,7 +44,7 @@ The tarball of the source tree is available via pip download kltpicker. You can 
 You can also install the development version of KLTPicker from a cloned Git repository:
 
 
-    $ git clone https://github.com/dalitco54/kltpick.git
+    $ git clone https://github.com/ShkolniskyLab/kltpicker.git
 
     $ cd kltpicker
 
