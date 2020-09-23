@@ -8,7 +8,7 @@ try:
 except:
     pass
 
-def downsample_cp(image, size_out):
+def downsample_gpu(image, size_out):
     """ 
     Use Fourier methods to change the sample interval and/or aspect ratio
     of any dimensions of the input image. Uses CuPy.
@@ -39,12 +39,20 @@ def downsample(image, size_out):
 def lgwt(n, a, b):
     """
     Get n leggauss points in interval [a, b]
-
-    :param n: Number of points.
-    :param a: Interval starting point.
-    :param b: Interval end point.
-    :returns x: Sample points.
-    :returns w: Weights.
+    Parameters
+    ----------
+    n : int
+        Number of points.
+    a : float
+        Interval starting point.
+    b : float
+        Interval end point.
+    Returns
+    -------
+    x : numpy.ndarray
+        Sample points.
+    w : numpy.ndarray
+        Weights.
     """
     x1, w = leggauss(n)
     m = (b - a) / 2
@@ -300,8 +308,7 @@ def gwindow(p, max_d):
     Returns
     -------
     w : numpy.ndarray
-        (2p-1)x(2p-1) array..
-
+        (2p-1)x(2p-1) array.
     """
     l = 2 * p - 1
     y = np.array([[x for x in range(l)] for x in range(l)])
@@ -341,7 +348,6 @@ def bsearch(x, lower_bound, upper_bound):
         The smallest index such that LowerBound<=x(index)<=UpperBound.
     upper_idx: int
         The largest index such that LowerBound<=x(index)<=UpperBound.
-
     """
     if lower_bound > x[-1] or upper_bound < x[0] or upper_bound < lower_bound:
         return None, None
@@ -387,9 +393,16 @@ def cryo_prewhiten(image, noise_response):
     """
     Pre-whiten a projection using the power spectrum of the noise.
 
-    :param proj: images/projection
-    :param noise_response: 2d image with the power spectrum of the noise.
-    :return: Pre-whitened image.
+    Parameters
+    ----------
+    image : numpy.ndarray
+        image/projection.
+    noise_response : numpy.ndarray
+        2d image with the power spectrum of the noise.
+
+    Returns
+    -------
+    p2 : Pre-whitened image.
     """
     delta = np.finfo(image.dtype).eps
 
@@ -400,46 +413,67 @@ def cryo_prewhiten(image, noise_response):
     k1 = int(np.ceil(K1 / 2))
     k2 = int(np.ceil(K2 / 2))
 
+    # The whitening filter is the sqrt of of the power spectrum of the noise.
+    # Also, normalize the energy of the filter to one.
     filter_var = np.sqrt(noise_response)
     filter_var /= np.linalg.norm(filter_var)
 
+    # The filter should be circularly symmetric. In particular, it is up-down
+    # and left-right symmetric. Get rid of any tiny asymmetries in the filter:
     filter_var = (filter_var + np.flipud(filter_var)) / 2
     filter_var = (filter_var + np.fliplr(filter_var)) / 2
 
+    # The filter may have very small values or even zeros. We don't want to
+    # process these so make a list of all large entries.
     nzidx = np.where(filter_var > 100 * delta)
 
     fnz = filter_var[nzidx]
     one_over_fnz = 1 / fnz
 
-    # matrix with 1/fnz in nzidx, 0 elsewhere
+    # matrix with 1/fnz in nzidx, 0 elsewhere. Later we multiply the Fourier
+    # transform of the padded image with this.
     one_over_fnz_as_mat = np.zeros((noise_response.shape[0], noise_response.shape[1]))
     one_over_fnz_as_mat[nzidx] += one_over_fnz
+    
+    # Pad the input projection.
     pp = np.zeros((noise_response.shape[0], noise_response.shape[1]))
     p2 = np.zeros((L1, L2), dtype='complex128')
-
     row_start_idx = k1 - l1 - 1
     row_end_idx = k1 + l1
     col_start_idx = k2 - l2 - 1
     col_end_idx = k2 + l2
-
     if L1 % 2 == 0 and L2 % 2 == 0:
         row_end_idx -= 1
         col_end_idx -= 1
-
     pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = image.copy()
-    fp = np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(pp)))))
+    
+    # Take the Fourier transform of the padded image.
+    fp = np.fft.fftshift(np.transpose(fft2(np.transpose(np.fft.ifftshift(pp)))))   
+    # Divide the image by the whitening filter, but only in places where the 
+    # filter is large. In frequecies where the filter is tiny  we cannot 
+    # pre-whiten so we just put zero.
     fp *= one_over_fnz_as_mat
+    # pp2 for padded p2.
     pp2 = np.fft.fftshift(np.transpose(ifft2(np.transpose(np.fft.ifftshift(fp)))))
+    # The resulting image should be real.
     p2 = np.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx]).copy()
     return p2
 
-def cryo_prewhiten_cp(image, noise_response):
+def cryo_prewhiten_gpu(image, noise_response):
     """
-    Pre-whiten a projection using the power spectrum of the noise.
+    Pre-whiten a projection using the power spectrum of the noise. We accelerate
+    the Fourier transform by using GPU (CuPy).
 
-    :param proj: images/projection
-    :param noise_response: 2d image with the power spectrum of the noise.
-    :return: Pre-whitened image.
+    Parameters
+    ----------
+    image : numpy.ndarray
+        image/projection.
+    noise_response : numpy.ndarray
+        2d image with the power spectrum of the noise.
+
+    Returns
+    -------
+    p2 : Pre-whitened image.
     """
     delta = np.finfo(image.dtype).eps
 
@@ -450,36 +484,49 @@ def cryo_prewhiten_cp(image, noise_response):
     k1 = int(np.ceil(K1 / 2))
     k2 = int(np.ceil(K2 / 2))
 
+    # The whitening filter is the sqrt of of the power spectrum of the noise.
+    # Also, normalize the energy of the filter to one.
     filter_var = np.sqrt(noise_response)
     filter_var /= np.linalg.norm(filter_var)
-
+    
+    # The filter should be circularly symmetric. In particular, it is up-down
+    # and left-right symmetric. Get rid of any tiny asymmetries in the filter:
     filter_var = (filter_var + np.flipud(filter_var)) / 2
     filter_var = (filter_var + np.fliplr(filter_var)) / 2
-
+    
+    # The filter may have very small values or even zeros. We don't want to
+    # process these so make a list of all large entries.
     nzidx = np.where(filter_var > 100 * delta)
 
     fnz = filter_var[nzidx]
     one_over_fnz = 1 / fnz
 
-    # matrix with 1/fnz in nzidx, 0 elsewhere
+    # matrix with 1/fnz in nzidx, 0 elsewhere, later we multiply the Fourier
+    # transform of the padded image with this.
     one_over_fnz_as_mat = np.zeros((noise_response.shape[0], noise_response.shape[1]))
     one_over_fnz_as_mat[nzidx] += one_over_fnz
+    
+    # Pad the input projection.
     pp = cp.zeros((noise_response.shape[0], noise_response.shape[1]))
     p2 = np.zeros((L1, L2), dtype='complex128')
-
     row_start_idx = k1 - l1 - 1
     row_end_idx = k1 + l1
     col_start_idx = k2 - l2 - 1
     col_end_idx = k2 + l2
-
     if L1 % 2 == 0 and L2 % 2 == 0:
         row_end_idx -= 1
         col_end_idx -= 1
-
     pp[row_start_idx:row_end_idx, col_start_idx:col_end_idx] = cp.asarray(image)
+    
+    # Take the Fourier transform of the padded image.
     fp = cp.fft.fftshift(cp.transpose(cp.fft.fft2(cp.transpose(cp.fft.ifftshift(pp)))))
+    # Divide the image by the whitening filter, but only in places where the 
+    # filter is large. In frequecies where the filter is tiny  we cannot 
+    # pre-whiten so we just put zero.
     fp = fp * cp.asarray(one_over_fnz_as_mat)
+    # pp2 for padded p2.
     pp2 = cp.fft.fftshift(cp.transpose(cp.fft.ifft2(cp.transpose(cp.fft.ifftshift(fp)))))
+    # The resulting image should be real.
     p2 = cp.real(pp2[row_start_idx:row_end_idx, col_start_idx:col_end_idx])
     return cp.asnumpy(p2)
 
@@ -488,13 +535,27 @@ def als_find_min(sreal, eps, max_iter):
     ALS method for RPSD factorization.
 
     Approximate Clean and Noise PSD and the particle location vector alpha.
-    :param sreal: PSD matrix to be factorized
-    :param eps: Convergence term
-    :param max_iter: Maximum iterations
-    :return approx_clean_psd: Approximated clean PSD
-    :return approx_noise_psd: Approximated noise PSD
-    :return alpha_approx: Particle location vector alpha.
-    :return stop_par: Stop algorithm if an error occurred.
+    Parameters
+    ----------
+    sreal : numpy.ndarray
+        PSD matrix to be factorized
+    eps : float
+        Convergence term
+    max_iter : int
+        Maximum iterations.
+    
+    Returns
+    -------
+    p2 : numpy.ndarray 
+        Pre-whitened image.
+    approx_clean_psd : numpy.ndarray 
+        Approximated clean PSD
+    approx_noise_psd : numpy.ndarray
+        Approximated noise PSD
+    alpha_approx : numpy.ndarray
+        Particle location vector alpha.
+    stop_par : int
+        Stop algorithm if an error occurred.
     """
     sreal = sreal.transpose()
     sz = sreal.shape

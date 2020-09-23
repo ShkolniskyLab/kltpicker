@@ -1,7 +1,7 @@
 import numpy as np
-from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, fftconvolve2d_cp, trig_interpolation_mat
+from .util import f_trans_2, stdfilter, trig_interpolation, radial_avg, fftcorrelate, fftconvolve2d_gpu, trig_interpolation_mat
 from scipy import signal
-from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, cryo_prewhiten_cp, picking_from_scoring_mat, als_find_min
+from .cryo_utils import lgwt, cryo_epsds, cryo_prewhiten, cryo_prewhiten_gpu, picking_from_scoring_mat, als_find_min
 try:
     import cupy as cp
 except:
@@ -93,7 +93,7 @@ class Micrograph:
         Approximate clean and noise radial power spectrum density of 
         micrograph.
         """
-        micro_size = self.noise_mc.shape[0]
+        micro_size = np.min(self.noise_mc.shape)
         m = np.floor(micro_size / patch_size)
         M = (m ** 2).astype(int)
         L = int(patch_size)
@@ -211,7 +211,7 @@ class Micrograph:
         if no_gpu:
             noise_mc_prewhite = cryo_prewhiten(self.noise_mc, noise_psd_mat)
         else:
-            noise_mc_prewhite = cryo_prewhiten_cp(self.noise_mc, noise_psd_mat)
+            noise_mc_prewhite = cryo_prewhiten_gpu(self.noise_mc, noise_psd_mat)
         noise_mc_prewhite = noise_mc_prewhite - np.mean(noise_mc_prewhite)
         noise_mc_prewhite = noise_mc_prewhite / np.linalg.norm(noise_mc_prewhite, 'fro')
         self.noise_mc = noise_mc_prewhite
@@ -325,12 +325,12 @@ class Micrograph:
             for i in range(self.num_of_func):
                 qp_tmp = cp.reshape(qp[i, :], (kltpicker.patch_size_func, kltpicker.patch_size_func)).transpose()             
                 qp_tmp = cp.flip(cp.flip(qp_tmp, 0), 1)              
-                scoreTmp = fftconvolve2d_cp(noise_mc, qp_tmp)
+                scoreTmp = fftconvolve2d_gpu(noise_mc, qp_tmp)
                 log_test_mat = log_test_mat + D[i] * abs(scoreTmp ** 2)
             
             log_test_mat = log_test_mat.transpose() - mu
             neigh = cp.ones((kltpicker.patch_size_func, kltpicker.patch_size_func))
-            log_test_n = cp.asnumpy(fftconvolve2d_cp(log_test_mat, neigh))
+            log_test_n = cp.asnumpy(fftconvolve2d_gpu(log_test_mat, neigh))
         else:
             log_test_mat = np.zeros((num_of_patch_row, num_of_patch_col))
             for i in range(self.num_of_func):

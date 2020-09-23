@@ -5,6 +5,7 @@ import time
 import argparse
 import os
 import re
+import random
 try:
     import cupy
     num_gpus = cupy.cuda.runtime.getDeviceCount()
@@ -224,13 +225,12 @@ def progress_bar(output_dir, num_mrcs):
     periodically checking how many output files have been written. Shows both
     percentage completed and time elapsed.
     """
-    start_time = time.time()
-    finished = [f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time]
-    num_finished = len(finished)
+    start_time = get_start_time(output_dir)
+    num_finished = check_num_finished(output_dir, start_time)
     bar = progressbar.ProgressBar(maxval=num_mrcs, widgets=["[", progressbar.Timer(), "] ", progressbar.Bar('#', '|', '|'), ' (', progressbar.Percentage(), ')'])
     bar.start()
     while num_finished < num_mrcs:
-        num_finished = len([f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time])
+        num_finished = check_num_finished(output_dir, start_time)
         bar.update(num_finished)
         time.sleep(1)
     bar.finish()
@@ -240,6 +240,20 @@ def check_num_finished(output_dir, start_time):
     finished = [f for f in output_dir.glob("*.star") if os.path.getmtime(str(f)) > start_time]
     num_finished = len(finished)
     return num_finished
+
+def get_start_time(output_dir):
+    """
+    For some reason time.time() and getmtime of a file do not appear to be 
+    calculated in the same timezone. So we get the start time by checking the 
+    modification time of a file we create (and immediately delete). A bit ugly,
+    but works.
+    """
+    fp = output_dir / ('%010x' % random.randrange(16**10))
+    with fp.open("w") as f:
+        f.write("hi")
+    start_time = os.path.getmtime(str(fp))
+    os.remove(str(fp))
+    return start_time
     
 def write_summary(output_dir, summary):
     print("\nWriting picking summary at the output path.")

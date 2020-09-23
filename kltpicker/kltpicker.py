@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 import scipy.special as ssp
 from .cryo_utils import lgwt
+from .kltpicker_input import get_start_time
 from multiprocessing import Pool, cpu_count
 import time
 
@@ -106,7 +107,7 @@ class KLTPicker:
         self.rad_mat = 0
         self.verbose = args.verbose
         self.num_mrcs = 0
-        self.start_time = time.time()
+        self.start_time = get_start_time(self.output_dir)
 
 
     def preprocess(self):

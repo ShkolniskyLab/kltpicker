@@ -7,7 +7,7 @@ from .util import trig_interpolation
 from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished
 import mrcfile
 from .micrograph import Micrograph
-from .cryo_utils import downsample, downsample_cp
+from .cryo_utils import downsample, downsample_gpu
 import multiprocessing as mp
 import os
 import time
@@ -42,7 +42,7 @@ def get_micrograph(mrc_file, mgscale, no_gpu):
     if no_gpu:
         mrc_data = downsample(mrc_data, (np.floor(np.multiply(mgscale, mrc_size))).astype(int))
     else:
-        mrc_data = downsample_cp(cp.asarray(mrc_data), (np.floor(np.multiply(mgscale, mrc_size))).astype(int))
+        mrc_data = downsample_gpu(cp.asarray(mrc_data), (np.floor(np.multiply(mgscale, mrc_size))).astype(int))
     if np.mod(mrc_data.shape[0], 2) == 0:  # Odd size is needed.
         mrc_data = mrc_data[0:-1, :]
     if np.mod(mrc_data.shape[1], 2) == 0:  # Odd size is needed.
@@ -161,7 +161,7 @@ def main():
 
     else: # User didn't enter arguments, use interactive mode to get arguments.
         args = parse_args(HAS_CUPY) # Initiate args with default values.
-        args.input_dir, args.output_dir, args.particle_size, args.num_of_particles, args.num_of_noise_images, args.no_gpu, args.gpus, args.verbose, args.max_processes = get_args(HAS_CUPY)
+        args.input_dir, args.output_dir, args.particle_size, args.num_particles, args.num_noise, args.no_gpu, args.gpus, args.verbose, args.max_processes = get_args(HAS_CUPY)
         
     # Handle user options:
     # If max_processes limit not set, set it to infinity.
@@ -178,6 +178,8 @@ def main():
     
     if not args.no_gpu:
         print("Using GPUs %s."%(", ".join([str(x) for x in args.gpus])))
+    if not args.output_dir.exists(): # If the output directory doesn't exist, create it.
+        Path.mkdir(args.output_dir)
     
     picker = KLTPicker(args) # Initiate picker object.
     picker.num_mrcs = num_files
@@ -189,8 +191,6 @@ def main():
     print("Preprocessing (usually takes up to 1 minute)...")
     picker.preprocess()
     params = [[mrc_file, picker] for mrc_file in mrc_files]
-    if not picker.output_dir.exists(): # If the output directory doesn't exist, create it.
-        Path.mkdir(picker.output_dir)
     
     if args.no_gpu: # GPU is disabled by user/not available on system.
         print("Preprocess finished. Picking particles...")

@@ -189,7 +189,7 @@ def trig_interpolation(x, y, xq):
             p = p + y[k] * a
     return p
 
-def fftconvolve2d_cp(x, y):
+def fftconvolve2d_gpu(x, y):
     """
     Convolve two 2-dimensional arrays using FFT, utilizing CuPy.
     The convolution is in valid mode, meaning that the output consists only of
