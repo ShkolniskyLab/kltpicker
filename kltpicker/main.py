@@ -178,7 +178,7 @@ def main():
     
     if not args.no_gpu:
         print("Using GPUs %s."%(", ".join([str(x) for x in args.gpus])))
-    if not args.output_dir.exists(): # If the output directory doesn't exist, create it.
+    if not Path(args.output_dir).exists(): # If the output directory doesn't exist, create it.
         Path.mkdir(args.output_dir)
     
     picker = KLTPicker(args) # Initiate picker object.
