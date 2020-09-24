@@ -4,7 +4,7 @@ from sys import exit, argv
 import numpy as np
 from .kltpicker import KLTPicker
 from .util import trig_interpolation
-from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished
+from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished, check_for_newer_version
 import mrcfile
 from .micrograph import Micrograph
 from .cryo_utils import downsample, downsample_gpu
@@ -145,6 +145,10 @@ def get_mrc_batches(params, cpus_per_gpu):
     return batches
        
 def main():
+    try:
+        check_for_newer_version()
+    except:
+        pass
     # Because of CUDA limitations, it is impossible to fork processes after 
     # invoking CUDA. So we need to use 'spawn' start method instead.
     mp.set_start_method('spawn', force=True)

@@ -1,6 +1,7 @@
 from pathlib import Path
-from sys import exit
+import sys
 import progressbar
+import subprocess
 import time 
 import argparse
 import os
@@ -101,7 +102,7 @@ def get_args(has_cupy):
                     break
                 elif create_dir.strip().lower().startswith('n'):
                     print("OK, exiting...")
-                    exit(0)
+                    sys.exit(0)
                 else:
                     print("Please choose Y/N.") 
             break
@@ -266,3 +267,26 @@ def write_summary(output_dir, summary):
         summary_file.write("Picked %d particles and %d noise images out of %d micrographs.\n\n" %(num_particles, num_noise, num_files))
         summary_file.write("Picking per micrograph:\nMicrographs name #1\nNumber of picked particles #2\nNumber of picked noise images #3\n--------------------------------\n")   
         summary_file.write(summary_text)
+
+def check_for_newer_version():
+    """
+    This function checks whether there is a newer version of kltpicker 
+    available on PyPI. If there is, it issues a warning.
+
+    """
+    name = 'kltpicker'
+    # Use pip to try and install a version of kltpicker which does not exist.
+    # In answer, you get all available versions. Find the newest one.
+    latest_version = str(subprocess.run([sys.executable, '-m', 'pip', 'install', '%s==random' %name], capture_output=True, text=True))
+    latest_version = latest_version[latest_version.find('(from versions:')+15:]
+    latest_version = latest_version[:latest_version.find(')')]
+    latest_version = latest_version.replace(' ','').split(',')[-1]
+    
+    if latest_version == 'none': # Got an unexpected response.
+        pass
+    else: # Use pip to determine the installed version.
+        current_version = str(subprocess.run([sys.executable, '-m', 'pip', 'show', name], capture_output=True, text=True))
+        current_version = current_version[current_version.find('Version:')+8:]
+        current_version = current_version[:current_version.find('\\n')].replace(' ','') 
+        if latest_version != current_version:
+            print("NOTE: you are running an old version of %s (%s). A newer version (%s) is available, please upgrade."%(name, current_version, latest_version))

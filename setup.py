@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='kltpicker',
-      version='1.2.1',
+      version='1.2.3',
       description='KLT picker',
       url='http://github.com/dalitco54/kltpick',
       author='Dalit Cohen',
