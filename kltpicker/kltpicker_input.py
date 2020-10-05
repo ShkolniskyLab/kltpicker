@@ -25,6 +25,7 @@ def parse_args(has_cupy):
                         default=0, type=check_positive_int_or_zero)
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose. Choose this to display number of particles and noise images picked from each micrograph during runtime. Otherwise, you get a simple progress bar.', default=False)
     parser.add_argument('--max-processes', help='Limit the number of concurrent processes to run. -1 to let the program choose.', type=check_positive_int_or_all, default=-1)
+    parser.add_argument('--only-do-unfinished', help='Only pick micrographs for which no coordinate file exists in the output directory.', action='store_true', default=False)
     if has_cupy:
         parser.add_argument('--no-gpu', action='store_true', help="Don't use GPUs.", default=False)
         parser.add_argument('--gpus', help='Indices of GPUs to be used. Valid indices: 0,...,%d. Enter -1 to use all available GPUS.'%(num_gpus-1), default=[-1], nargs='+', type=check_range_gpu)
@@ -76,6 +77,7 @@ def check_dir_exists(value):
     return value    
 
 def get_args(has_cupy):
+    print("\n")
     while True:
         input_dir = Path(input('Enter full path of micrographs MRC files: '))
         num_files = len(list(input_dir.glob("*.mrc")))
@@ -86,7 +88,19 @@ def get_args(has_cupy):
             print("%s is not a directory." % input_dir)
         else:
             print("Could not find any files in %s." % input_dir)
-
+    
+    while True:
+        particle_size = input('Enter the particle size in pixels: ')
+        try:
+            particle_size = int(particle_size)
+            if particle_size < 1:
+                print("Particle size must be a positive integer.")
+            else:
+                break
+        except ValueError:
+            print("Particle size must be a positive integer.")
+    
+    only_do_unfinished = False
     while True:
         output_path = input('Enter full path of output directory: ')
         output_dir = Path(output_path)
@@ -101,27 +115,35 @@ def get_args(has_cupy):
                     Path.mkdir(output_dir)
                     break
                 elif create_dir.strip().lower().startswith('n'):
-                    print("OK, exiting...")
+                    print("OK, aborting...")
                     sys.exit(0)
                 else:
                     print("Please choose Y/N.") 
             break
         elif not output_dir.parent.exists():
             print('Parent directory %s does not exist. Please specify an existing directory.' % output_dir.parent)
-        else:
-            break
-
-    while True:
-        particle_size = input('Enter the particle size in pixels: ')
-        try:
-            particle_size = int(particle_size)
-            if particle_size < 1:
-                print("Particle size must be a positive integer.")
-            else:
+        elif output_dir.is_dir():
+            num_finished = check_output_dir(input_dir, output_dir, particle_size)
+            if num_finished == 1:
                 break
-        except ValueError:
-            print("Particle size must be a positive integer.")
-
+            elif num_finished == 2:
+                print("The directory you specified contains coordinate files for all of the micrographs in the input directory. Aborting...")
+                sys.exit()
+            else:
+                while True:
+                    only_do_unfinished = input("The directory you specified contains coordinate files for some of the micrographs in the input directory. Run only on micrographs which have no coordinate file? (Y/N): ")
+                    if only_do_unfinished.strip().lower().startswith('y'):
+                        only_do_unfinished = True
+                        break
+                    elif only_do_unfinished.strip().lower().startswith('n'):
+                        print("OK, aborting...")
+                        sys.exit(0)
+                    else:
+                        print("Please choose Y/N.") 
+                break
+            break
+        
+            
     num_particles_to_pick = 0
     while num_particles_to_pick == 0:
         pick_all = input('Pick all particles? (Y/N): ')
@@ -218,7 +240,33 @@ def get_args(has_cupy):
     else:
         no_gpu = 1
         gpu_indices = []
-    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu, gpu_indices, verbose, max_processes
+    return input_dir, output_dir, particle_size, num_particles_to_pick, num_noise_to_pick, no_gpu, gpu_indices, verbose, max_processes, only_do_unfinished
+
+def check_output_dir(input_dir, output_dir, particle_size):
+    """
+    Checks how many coordinate files there are in the output directory with
+    names matching the micrographs in the input directory, if any.
+    If there are no micrographs in input_dir, return 0.
+    If the intersection between coordinate file names and micrograph file 
+    names is empty, return 1.
+    If all micrographs have an output coordinate file, return 2.
+    Else, return list of micrograph names which do not have an output file.
+    """
+    mrcs = [mrc for mrc in input_dir.glob("*.mrc")]
+    if mrcs == []:
+        return 0
+    mrc_names = [mrc.name[:-4] for mrc in mrcs]
+    output_particles_box_path = output_dir / ("pickedParticlesParticleSize%i/box"%particle_size)
+    output = [f for f in output_particles_box_path.glob("*.box")]
+    output_names = [f.name[:-4] for f in output]
+    intersection = list(set(output_names) & set(mrc_names))
+    if len(intersection) == 0:
+        return 1
+    elif len(intersection) == len(mrc_names):
+        return 2
+    else:
+        unfinished = list(set(mrc_names) - set(output_names))
+        return [mrc for mrc in mrcs if mrc.name[:-4] in unfinished]
 
 def progress_bar(output_dir, num_mrcs):
     """

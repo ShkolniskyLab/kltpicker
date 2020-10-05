@@ -4,7 +4,7 @@ from sys import exit, argv
 import numpy as np
 from .kltpicker import KLTPicker
 from .util import trig_interpolation
-from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished, check_for_newer_version
+from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished, check_for_newer_version, check_output_dir
 import mrcfile
 from .micrograph import Micrograph
 from .cryo_utils import downsample, downsample_gpu
@@ -162,23 +162,44 @@ def main():
         if args.output_dir is None or args.input_dir is None or args.particle_size is None:
             print("Error: one or more of the following arguments are missing: input-dir, output-dir, particle-size. For help run kltpicker -h")
             exit()
+        else:
+            num_finished_output = check_output_dir(Path(args.input_dir), Path(args.output_dir), args.particle_size)
+            if num_finished_output == 2:
+                print("The output directory contains coordinate files for all of the micrographs in the input directory. Aborting...")
+                exit()
+            elif num_finished_output == 1:
+                pass
+            elif num_finished_output == 0:
+                print("Could not find any .mrc files in %s. \nExiting..." % args.input_dir)
+                exit(0)        
+            else:
+                if not args.only_do_unfinished:
+                    print("The output directory contains coordinate files for some of the micrographs in the input directory. Use --do-unfinished-only if needed. Aborting...")
+                    exit()
 
     else: # User didn't enter arguments, use interactive mode to get arguments.
         args = parse_args(HAS_CUPY) # Initiate args with default values.
-        args.input_dir, args.output_dir, args.particle_size, args.num_particles, args.num_noise, args.no_gpu, args.gpus, args.verbose, args.max_processes = get_args(HAS_CUPY)
-        
-    # Handle user options:
+        args.input_dir, args.output_dir, args.particle_size, args.num_particles, args.num_noise, args.no_gpu, args.gpus, args.verbose, args.max_processes, args.only_do_unfinished = get_args(HAS_CUPY)
+    
+    ### if I made it here, it means that either the output dir is empty 
+    ### num_finished_output==1, or it is not emtpy and args.only_do_unfinished=True.    
+    
+    
+    # Handle user options:     
     # If max_processes limit not set, set it to infinity.
     if args.max_processes == -1:
         args.max_processes = np.inf
     
-    # Find number of .mrc files in input directory. If there are none, exit.
-    num_files = len(list(Path(args.input_dir).glob("*.mrc")))
-    if num_files > 0:
-        print("\nRunning on %i files." % len(list(Path(args.input_dir).glob("*.mrc"))))
-    else:
-        print("Could not find any .mrc files in %s. \nExiting..." % args.input_dir)
-        exit(0)
+    # Find number of .mrc files in input directory. 
+    # Check if output directory already contains any output coordinate files 
+    # for the micrographs in the input directory. If so, remove these 
+    # micrographs from the micrographs to be processed.
+    # If there are no micrographs to process, exit.
+    
+    mrc_files = check_output_dir(Path(args.input_dir), Path(args.output_dir), args.particle_size)
+    if mrc_files == 1:    
+        mrc_files = list(Path(args.input_dir).glob("*.mrc"))
+    print("\nRunning on %i files." % len(mrc_files))
     
     if not args.no_gpu:
         print("Using GPUs %s."%(", ".join([str(x) for x in args.gpus])))
@@ -186,8 +207,8 @@ def main():
         Path.mkdir(args.output_dir)
     
     picker = KLTPicker(args) # Initiate picker object.
-    picker.num_mrcs = num_files
-    mrc_files = picker.input_dir.glob("*.mrc")
+    picker.num_mrcs = len(mrc_files)
+    
     
     # Preprocessing. If using GPU, preprocessing includes the calculation of 
     # memory that is taken up in the processing of a single micrograph in the
@@ -200,7 +221,7 @@ def main():
         print("Preprocess finished. Picking particles...")
         os.environ["NUMBA_DISABLE_CUDA"] = "1"  # Disable use of CUDA by NUMBA.
         if not picker.verbose: # Display simple progress bar.
-            p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", num_files], name="KLTPicker_ProgressBar")
+            p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", len(mrc_files)], name="KLTPicker_ProgressBar")
             p.start() 
         # Pick particles. The number of concurrent processes is the minimum of
         # the limit set by the user and two less than the number of CPUs on the machine.
@@ -219,7 +240,7 @@ def main():
         procs_per_gpu = calc_procs_per_gpu(mem_usage, args.max_processes, args.gpus)
         batches = get_mrc_batches(params, procs_per_gpu)
         if not picker.verbose: # Display simple progress bar.
-            p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", num_files], name="KLTPicker_ProgressBar")
+            p = mp.Process(target=progress_bar, args=[picker.output_particles / "star", len(mrc_files)], name="KLTPicker_ProgressBar")
             p.start()
         # We have multiple processes writing results to the same "res" object,
         # so we need a manager (in the version without GPU the pool function
