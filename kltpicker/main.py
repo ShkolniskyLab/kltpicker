@@ -181,10 +181,6 @@ def main():
         args = parse_args(HAS_CUPY) # Initiate args with default values.
         args.input_dir, args.output_dir, args.particle_size, args.num_particles, args.num_noise, args.no_gpu, args.gpus, args.verbose, args.max_processes, args.only_do_unfinished = get_args(HAS_CUPY)
     
-    ### if I made it here, it means that either the output dir is empty 
-    ### num_finished_output==1, or it is not emtpy and args.only_do_unfinished=True.    
-    
-    
     # Handle user options:     
     # If max_processes limit not set, set it to infinity.
     if args.max_processes == -1:
@@ -194,10 +190,9 @@ def main():
     # Check if output directory already contains any output coordinate files 
     # for the micrographs in the input directory. If so, remove these 
     # micrographs from the micrographs to be processed.
-    # If there are no micrographs to process, exit.
     
     mrc_files = check_output_dir(Path(args.input_dir), Path(args.output_dir), args.particle_size)
-    if mrc_files == 1:    
+    if mrc_files == 1: # Need to process all the micrographs in the input dir. 
         mrc_files = list(Path(args.input_dir).glob("*.mrc"))
     print("\nRunning on %i files." % len(mrc_files))
     
