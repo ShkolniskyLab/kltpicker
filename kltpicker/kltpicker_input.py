@@ -304,34 +304,6 @@ def get_start_time(output_dir):
     os.remove(str(fp))
     return start_time
     
-def write_summary(output_dir, summary):
-    print("\nWriting picking summary at the output path.")
-    # First check if there is an existing summary file in the ouptut directory.
-    # If there is, parse it and append to it.
-    if (output_dir / "pickingSummary.txt").exists():
-        old_summ_stat, old_pick_per_mrc = parse_summary(output_dir)
-    else: 
-        old_summ_stat = [0, 0, 0]
-        old_pick_per_mrc = []
-    
-    summary_text = "\n".join(old_pick_per_mrc + ["\t".join([str(cell) for cell in row]) for row in summary])
-    num_files = len(summary) + old_summ_stat[2]
-    num_particles = sum([row[1] for row in summary]) + old_summ_stat[0]
-    num_noise = sum([row[2] for row in summary]) + old_summ_stat[1]
-    with (output_dir / "pickingSummary.txt").open("w") as summary_file:
-        summary_file.write("Picking Summary\n")
-        summary_file.write("Picked %d particles and %d noise images out of %d micrographs.\n\n" %(num_particles, num_noise, num_files))
-        summary_file.write("Picking per micrograph:\nMicrographs name #1\nNumber of picked particles #2\nNumber of picked noise images #3\n--------------------------------\n")   
-        summary_file.write(summary_text)
-
-def parse_summary(output_dir):
-    with (output_dir / "pickingSummary.txt").open("r") as summary_file:
-        old_summ = summary_file.read()
-    lines = old_summ.split("\n")
-    summ_stat = [int(s) for s in lines[1].split() if s.isdigit()]
-    pick_per_mrc = [line for line in lines if ".mrc" in line]
-    return summ_stat, pick_per_mrc   
-
 def check_for_newer_version():
     """
     This function checks whether there is a newer version of kltpicker 

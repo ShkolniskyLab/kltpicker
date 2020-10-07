@@ -4,7 +4,7 @@ from sys import exit, argv
 import numpy as np
 from .kltpicker import KLTPicker
 from .util import trig_interpolation
-from .kltpicker_input import parse_args, get_args, progress_bar, write_summary, check_num_finished, check_for_newer_version, check_output_dir
+from .kltpicker_input import parse_args, get_args, progress_bar, check_num_finished, check_for_newer_version, check_output_dir
 import mrcfile
 from .micrograph import Micrograph
 from .cryo_utils import downsample, downsample_gpu
@@ -255,7 +255,6 @@ def main():
             proc.join()
     
     # Write summary file and print summary to user.
-    write_summary(picker.output_dir, res)
     num_files = len(res)
     num_particles = sum([row[1] for row in res])
     num_noise = sum([row[2] for row in res]) 

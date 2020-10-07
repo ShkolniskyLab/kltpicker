@@ -2,9 +2,9 @@
 
 KLT Picker: particle picking using data-driven optimal templates.
 
-Current version: 1.2.3
+Current version: 1.2.5
 
-Date: 09/2020
+Date: 10/2020
 
 This is the Python version containing the complete source code of the KLT Picker. A MATLAB version is available at http://github.com/amitayeldar/KLTpicker/.
 
