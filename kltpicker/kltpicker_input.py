@@ -274,7 +274,7 @@ def progress_bar(output_dir, num_mrcs):
     periodically checking how many output files have been written. Shows both
     percentage completed and time elapsed.
     """
-    start_time = get_start_time(output_dir)
+    start_time = get_start_time(output_dir.parent.parent)
     num_finished = check_num_finished(output_dir, start_time)
     bar = progressbar.ProgressBar(maxval=num_mrcs, widgets=["[", progressbar.Timer(), "] ", progressbar.Bar('#', '|', '|'), ' (', progressbar.Percentage(), ')'])
     bar.start()

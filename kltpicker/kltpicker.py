@@ -4,7 +4,6 @@ import scipy.special as ssp
 from .cryo_utils import lgwt
 from .kltpicker_input import get_start_time
 from multiprocessing import Pool, cpu_count
-import time
 
 # Globals:
 EPS = 10 ** (-2)  # Convergence term for ALS.
@@ -108,6 +107,7 @@ class KLTPicker:
         self.verbose = args.verbose
         self.num_mrcs = 0
         self.start_time = get_start_time(self.output_dir)
+        print(self.output_dir)
 
 
     def preprocess(self):
