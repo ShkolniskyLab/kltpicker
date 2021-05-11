@@ -13,9 +13,10 @@ import os
 import time
 warnings.filterwarnings("ignore")
 
-# Check if CuPy is installed:
+# Check if CuPy is installed and we have GPU devices
 try:
     import cupy as cp
+    cp.cuda.runtime.getDeviceCount()
     HAS_CUPY = 1
 except:
     HAS_CUPY = 0
